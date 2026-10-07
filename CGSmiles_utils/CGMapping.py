@@ -2,19 +2,21 @@ import cgsmiles
 from cgsmiles.drawing import draw_molecule
 import pysmiles
 
-import warnings, io
+import warnings, io, re, os
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 import numpy as np
 import matplotlib.pyplot as plt
 import MDAnalysis as mda
+import networkx as nx
+import vermouth
 from rdkit.Chem.Draw import rdMolDraw2D
 from rdkit.Geometry.rdGeometry import Point2D
 from rdkit.Chem import rdDepictor, MolToSmiles, SanitizeMol, AllChem, MolToPDBBlock
 from PIL import Image
 import cairosvg
 
-from .utils import cgsmiles_to_rdkit
+from .utils import cgsmiles_to_rdkit, write_file
 from .drawing_utils import _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_label, _strip_background
 warnings.filterwarnings("ignore", category=UserWarning, module='MDAnalysis')  # ignore warnings from MDAnalysis about missing box dimensions
 
@@ -173,14 +175,14 @@ class CGMapping:
 		mol, _ = self._build_mol(opts)
 		return MolToSmiles(mol, isomericSmiles=True)
 
-	def generate_AA_structure(self, out_file="molecule.pdb", resname=None):
+	def generate_AA_structure(self, out_file="molecule_aa.pdb", resname=None):
 		"""
 		Generate an all-atom structure file from a CGSmiles string.
 
 		Parameters
 		----------
 		out_file : str, optional
-			The name of the output structure file (default is "molecule.pdb").
+			The name of the output structure file (default is "molecule_aa.pdb").
 
 		Returns
 		-------
@@ -214,6 +216,68 @@ class CGMapping:
 			u.atoms.write(f"{out_file}")
 		else:
 			raise ValueError(f"Unsupported file type: {file_type}. Supported types are: {list(mda._SINGLEFRAME_WRITERS.keys())}")
-		
 
+	def generate_CG_structure(self, out_file="molecule_cg.pdb", resname=None):
+
+		if '_cg' in out_file:
+			out_file_aa = out_file.replace('_cg', '_aa')
+		else:
+			out_file_aa = f'{out_file.split(".")[0]}_aa'
+		out_file_aa = f'{out_file_aa.split(".")[0]}.pdb'
+		self.generate_AA_structure(out_file_aa, resname)
+
+		mol = vermouth.pdb.read_pdb(out_file_aa)[0]
+
+		mapping = next(nx.isomorphism.GraphMatcher(mol, self.aa_graph).match())
+
+		# check if index property is present in res_graph, if not add it
+		for node, data in self.cg_graph.nodes(data=True):
+			if 'index' not in data.keys():
+				if 'n' in data.keys() and re.search(r'\d+$', data['n']):
+					self.cg_graph.nodes[node]['index'] = int(re.search(r'\d+$', data['n']).group())  # extract number from n property
+				else:
+					self.cg_graph.nodes[node]['index'] = node  # fallback to using the node id if 'n' property is not present
+
+		for node in self.cg_graph.nodes:
+			pos = np.zeros((3))
+			fragment = self.cg_graph.nodes[node]['graph']
+			for all_atom_node in fragment:
+				pos += mol.nodes[mapping[all_atom_node]]['position']
+			pos = np.array(pos)
+			final_pos = pos / len(fragment) if len(fragment) > 0 else pos
+			self.cg_graph.nodes[node]['position'] = final_pos
+
+		position_dict = {node_id: data['position'] for node_id, data in self.cg_graph.nodes(data=True)}
+		for n, d in self.cg_graph.nodes(data=True):
+			if d['fragname'] == 'U':
+				self.cg_graph.nodes[n]['position'] = np.array([0.0, 0.0, 0.0])
+			else:
+				self.cg_graph.nodes[n]['position'] = position_dict[n]
+
+		for n in self.cg_graph.nodes:
+			d = self.cg_graph.nodes[n]
+			if d['fragname'] == 'U':
+				connected_nodes = [edge[1] if edge[0] == n else edge[0] for edge in self.cg_graph.edges(n)]
+				if len(connected_nodes) == 0:
+					raise ValueError(f'Warning: Unconnected U node at {n}, skipping')
+				coords = [self.cg_graph.nodes[c]["position"] for c in connected_nodes if self.cg_graph.nodes[c]["fragname"] != 'U']
+				d['position'] = np.mean(coords, axis=0)
+
+		pdb_lines = []
+		for n, d in sorted(self.cg_graph.nodes(data=True), key=lambda x: int(x[1]['index'])):
+			coords = d["position"]*10
+			line = f'HETATM{d["index"]:5d}  {d["n"][:3]:<3s} {resname[:3]:<3s}    1    {coords[0]:8.3f}{coords[1]:8.3f}{coords[2]:8.3f}  1.00  0.00            \n'
+			pdb_lines.append(line)
+		pdb_lines.append('END\n')
+
+		write_file(f"temp.pdb", pdb_lines)
+		u = mda.Universe("temp.pdb", in_memory=True)
+		os.remove("temp.pdb")
+		u.add_TopologyAttr('resnames', [resname])
+		u.dimensions = np.array([10.0, 10.0, 10.0, 90.0, 90.0, 90.0]) # set box size to avoid warnings
+		if  out_file.split('.')[-1].lower() in [fmt.casefold() for fmt in mda._SINGLEFRAME_WRITERS.keys()]:
+			u.atoms.write(f"{out_file}")
+		else:
+			raise ValueError(f"Unsupported file type: {out_file.split('.')[-1]}. Supported types are: {list(mda._SINGLEFRAME_WRITERS.keys())}")
+	
 	
