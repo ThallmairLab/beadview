@@ -77,7 +77,6 @@ class CGMapping:
 						Point2D(1000, 1000), Point2D(-1000, -1000))
 		return drawer
 
-	@staticmethod
 	def _draw_beads(self, mol, svg, idx_map, opts):
 		drawer_coords = self._make_drawer(opts)
 		drawer_coords.DrawMolecule(mol)
@@ -129,7 +128,7 @@ class CGMapping:
 		drawer.DrawMolecule(mol)
 		drawer.FinishDrawing()
 		svg = drawer.GetDrawingText()
-
+		print(opts)
 		if opts.show_mapping:
 			svg = self._draw_beads(mol, svg, idx_map, opts)
 		if opts.check_orientation:

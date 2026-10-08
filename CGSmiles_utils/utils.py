@@ -1,6 +1,18 @@
 import networkx as nx
 from rdkit import Chem
 
+
+def write_file(file_path, lines) -> None:
+	'''
+	Function that writes a list of lines to a text file.
+	'''
+	# check if lines is a list of strings
+	if not all(isinstance(line, str) for line in lines):
+		raise ValueError('lines must be a list of strings')
+	with open(file_path, 'w') as file:
+		file.writelines(lines)
+	return 
+
 def cgsmiles_to_rdkit(mol_graph, add_hydrogens=False):
 	'''
 	Convert a CGSmiles molecule graph to an RDKit molecule. 
@@ -71,14 +83,3 @@ def cgsmiles_to_rdkit(mol_graph, add_hydrogens=False):
 		else:
 			raise ValueError(f"Unsupported isomer type: {isomer[4]}")
 	return mol, idx_mapping
-
-def write_file(file_path, lines) -> None:
-	'''
-	Function that writes a list of lines to a text file.
-	'''
-	# check if lines is a list of strings
-	if not all(isinstance(line, str) for line in lines):
-		raise ValueError('lines must be a list of strings')
-	with open(file_path, 'w') as file:
-		file.writelines(lines)
-	return 
