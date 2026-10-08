@@ -128,7 +128,6 @@ class CGMapping:
 		drawer.DrawMolecule(mol)
 		drawer.FinishDrawing()
 		svg = drawer.GetDrawingText()
-		print(opts)
 		if opts.show_mapping:
 			svg = self._draw_beads(mol, svg, idx_map, opts)
 		if opts.check_orientation:
