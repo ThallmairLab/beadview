@@ -192,6 +192,65 @@ def _create_bond_line(start, end, color='#000000', width=2.0):
 	line_svg += f'\ty2="{end[1]}" />\n'
 	return ''.join(line_svg)
 
+def _create_polyline(points, color='#000000', width=2.0):
+	'''
+	Create SVG polyline element, used for angles and dihedrals.
+
+	Parameters
+	----------
+	points : list of list or np.array
+		The (x, y) positions the line passes through.
+	color : str
+		Line color.
+	width : float
+		Line width.
+
+	Returns
+	-------
+	str
+		The SVG polyline element as a string.
+	'''
+	points_str = ' '.join(f'{p[0]},{p[1]}' for p in points)
+	polyline_svg = ['<polyline\n']
+	polyline_svg += f'\tstyle="fill:none;stroke:{color};stroke-width:{width};stroke-linecap:round;stroke-linejoin:round"\n'
+	polyline_svg += f'\tpoints="{points_str}" />\n'
+	return ''.join(polyline_svg)
+
+def _offset_path(points, offset, trim=0.2):
+	'''
+	Points of a line that follows the path through the given points, shifted by offset to the side
+	the path turns towards (the inside of an angle). The outer ends are pulled back towards their
+	neighbors by the fraction trim of the first and last segment.
+
+	Parameters
+	----------
+	points : list of list or np.array
+		The (x, y) positions of the beads along the path (3 for angles, 4 for dihedrals).
+	offset : float
+		Distance between the line and the path.
+	trim : float
+		Fraction of the first and last segment by which the line is shortened at its ends.
+
+	Returns
+	-------
+	list of np.array
+		The points of the shifted line.
+	'''
+	points = [np.asarray(p, dtype=float) for p in points]
+	directions = [b - a for a, b in zip(points[:-1], points[1:])]
+	normals = [np.array([-d[1], d[0]]) / np.linalg.norm(d) for d in directions]
+	turn = sum(d1[0] * d2[1] - d1[1] * d2[0] for d1, d2 in zip(directions[:-1], directions[1:]))
+	normals = [n if turn >= 0 else -n for n in normals]
+
+	path = [points[0] + trim * directions[0] + offset * normals[0]]
+	for point, n1, n2 in zip(points[1:-1], normals[:-1], normals[1:]):
+		# corner where the two shifted segments meet; limited for very sharp turns
+		cos = np.dot(n1, n2)
+		scale = offset * min(1 / (1 + cos), 3 / np.linalg.norm(n1 + n2)) if 1 + cos > 1e-6 else 0
+		path.append(point + scale * (n1 + n2) if scale else point + offset * n1)
+	path.append(points[-1] - trim * directions[-1] + offset * normals[-1])
+	return path
+
 def _create_bead_label(bead_position, bead_type, bead_name=None, label_position=None, scale_factor=1.0, type_color='#666666', name_color='#000000'):
 	'''
 	Create SVG text element for a bead label.
