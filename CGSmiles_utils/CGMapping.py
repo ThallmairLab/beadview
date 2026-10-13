@@ -18,7 +18,7 @@ from PIL import Image
 import cairosvg
 
 from .utils import cgsmiles_to_rdkit
-from .drawing_utils import _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_label, _strip_background
+from .drawing_utils import _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_label, _create_bond_line, _strip_background
 from .itp_utils import itp_writer, add_comments_itp
 warnings.filterwarnings("ignore", category=UserWarning, module='MDAnalysis')  # ignore warnings from MDAnalysis about missing box dimensions
 
@@ -41,8 +41,12 @@ class DrawOptions:
 	show_mapping: bool = True
 	show_bead_labels: bool = False
 	show_vs: bool = True
+	indicate_vs: bool = True # dashed outline for beads that are virtual sites in the ITP loaded with read_itp()
 	show_node_indicators: bool = False
-	show_bonds: bool = False
+	show_bonds: bool = False # draw bonds and constraints from the ITP loaded with read_itp()
+	bond_color: str = '#000000'
+	constraint_color: str = "#0400FF"
+	cg_bond_width: float = 2.0
 	include_hydrogens_in_bead_position: bool | None = None # None follows show_hydrogens
 	bead_type_label_color : str = '#666666'
 	bead_name_label_color : str = '#000000'
@@ -53,6 +57,8 @@ class DrawOptions:
 	def __post_init__(self):
 		if self.show_bead_labels and not self.show_mapping:
 			warnings.warn("show_bead_labels has no effect when show_mapping=False")
+		if self.show_bonds and not self.show_mapping:
+			warnings.warn("show_bonds has no effect when show_mapping=False")
 
 	@property
 	def hydrogens_in_bead_position(self) -> bool:
@@ -111,8 +117,9 @@ class CGMapping:
 		bead_positions = {}
 		beads = [] 
 		labels = [] 
-		def add_bead(position, bead_type, bead_name):
-			beads.append(_create_bead_circle(position, bead_type, bead_name, opts.scale_factor))
+		itp_vs = self._itp_virtual_sites() if opts.indicate_vs and self.ff is not None else set()
+		def add_bead(bead, position, bead_type, bead_name):
+			beads.append(_create_bead_circle(position, bead_type, bead_name, opts.scale_factor, dashed=bead in itp_vs))
 			if opts.show_bead_labels:
 				labels.append(_create_bead_label(
 					position, bead_type, bead_name=bead_name,
@@ -127,15 +134,49 @@ class CGMapping:
 			bead_type = data['fragname']
 			pos = _get_bead_coordinate(data['graph'], idx_map, drawer_coords, opts, bead)
 			bead_positions[bead] = pos
-			add_bead(pos, bead_type, data.get('n'))
+			add_bead(bead, pos, bead_type, data.get('n'))
 
-		if opts.show_vs:
-			for vnode, connections in virtual_edges.items():
-				data = self.cg_graph.nodes[vnode]
-				pos = np.mean([bead_positions[b] for b in connections], axis=0)
-				add_bead(pos, data['fragname'], data.get('n'))
+		for vnode, connections in virtual_edges.items():
+			data = self.cg_graph.nodes[vnode]
+			pos = np.mean([bead_positions[b] for b in connections], axis=0)
+			bead_positions[vnode] = pos
+			if opts.show_vs:
+				add_bead(vnode, pos, data['fragname'], data.get('n'))
 
-		return svg.replace('</svg>', ''.join(beads) + ''.join(labels) + '</svg>')
+		hidden = set() if opts.show_vs else set(virtual_edges)
+		bonds = self._draw_cg_bonds(bead_positions, opts, hidden) if opts.show_bonds else []
+		return svg.replace('</svg>', ''.join(bonds) + ''.join(beads) + ''.join(labels) + '</svg>') # bonds below beads
+
+	def _draw_cg_bonds(self, bead_positions, opts, hidden=()):
+		'''
+		Create SVG lines for the bonds and constraints of the loaded ITP, colored by opts.bond_color and opts.constraint_color.
+
+		Parameters
+		----------
+		bead_positions : dict
+			Drawing coordinates of the beads, keyed by cg_graph node.
+		opts : DrawOptions
+		hidden : set
+			cg_graph nodes that are not drawn; interactions involving them are skipped.
+
+		Returns
+		-------
+		list of str
+			The SVG line elements.
+		'''
+		if self.ff is None:
+			raise RuntimeError("No ITP loaded, call read_itp() first.")
+		block = self.ff.blocks[self.molname]
+		itp_to_cg = self._itp_to_cg_nodes()
+		lines = []
+		for interaction_type, color in (('bonds', opts.bond_color), ('constraints', opts.constraint_color)):
+			for interaction in block.interactions.get(interaction_type, []):
+				i, j = (itp_to_cg[atom] for atom in interaction.atoms)
+				if i in hidden or j in hidden:
+					continue
+				lines.append(_create_bond_line(bead_positions[i], bead_positions[j],
+					color=color, width=opts.cg_bond_width * opts.scale_factor))
+		return lines
 
 	def to_svg(self, **kwargs) -> str:
 		opts = replace(kwargs.pop("opts", None) or DrawOptions(), **kwargs)
@@ -349,14 +390,35 @@ class CGMapping:
 		else:
 			self.molname = list(self.ff.blocks.keys())[0]
 
+	def _itp_to_cg_nodes(self):
+		'''
+		Map the nodes of the loaded ITP block to cg_graph nodes via their atom names.
+		'''
+		cg_by_name = {attrs["atomname"]: n for n, attrs in self.cg_graph.nodes(data=True)}
+		mapping = {}
+		for node, d in self.ff.blocks[self.molname].nodes(data=True):
+			if d["atomname"] not in cg_by_name:
+				raise ValueError("No matching node found in cg_graph for node {} in ff.blocks".format(node))
+			mapping[node] = cg_by_name[d["atomname"]]
+		return mapping
+
+	def _itp_virtual_sites(self):
+		'''
+		Return the cg_graph nodes that are defined as virtual sites in the loaded ITP.
+		'''
+		itp_to_cg = self._itp_to_cg_nodes()
+		block = self.ff.blocks[self.molname]
+		return {itp_to_cg[interaction.atoms[0]] # the virtual site is the first atom of each entry
+				for name, interactions in block.interactions.items() if name.startswith('virtual_sites')
+				for interaction in interactions}
+
 	def change_itp(self):
 		if self.ff is None:
 			raise RuntimeError("No ITP loaded, call read_itp() first.")
 		comments = {}
+		itp_to_cg = self._itp_to_cg_nodes()
 		for node, d in self.ff.blocks[self.molname].nodes(data=True):
-			cg_node = next((n for n, attrs in self.cg_graph.nodes(data=True) if attrs["atomname"] == d["atomname"]), None)
-			if cg_node is None:
-				raise ValueError("No matching node found in cg_graph for node {} in ff.blocks".format(node))
+			cg_node = itp_to_cg[node]
 			if d['atype'] != self.cg_graph.nodes[cg_node]["atype"]:
 				comments[node] = f"changed from {d['atype']} to {self.cg_graph.nodes[cg_node]['atype']}"
 				d['atype'] = self.cg_graph.nodes[cg_node]["atype"]

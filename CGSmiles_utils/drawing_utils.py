@@ -136,7 +136,7 @@ def _bead_color(bead_type):
 			color = '#808080' # gray
 	return color
 
-def _create_bead_circle(bead_position, bead_type, bead_name, scale_factor):
+def _create_bead_circle(bead_position, bead_type, bead_name, scale_factor, dashed=False):
 	'''
 	Create SVG circle element for a bead.
 	
@@ -148,6 +148,8 @@ def _create_bead_circle(bead_position, bead_type, bead_name, scale_factor):
 		The type of the bead.
 	bead_name : str
 		The name of the bead.
+	dashed : bool
+		Draw the outline dashed (used for virtual sites).
 
 	Returns
 	-------
@@ -155,13 +157,40 @@ def _create_bead_circle(bead_position, bead_type, bead_name, scale_factor):
 		The SVG circle element as a string.
 	'''
 	bead_name = bead_name if bead_name is not None else bead_type
+	dasharray = f'{2.5 * scale_factor},{1.75 * scale_factor}' if dashed else 'none'
 	circle_svg = ['<circle\n']
-	circle_svg += f'\tstyle="opacity:0.5;fill:{_bead_color(bead_type)};fill-opacity:1;stroke:#6e6e6e;stroke-width:{1.75 * scale_factor};stroke-miterlimit:4;stroke-dasharray:none"\n'
+	circle_svg += f'\tstyle="opacity:0.5;fill:{_bead_color(bead_type)};fill-opacity:1;stroke:#6e6e6e;stroke-width:{1.75 * scale_factor};stroke-miterlimit:4;stroke-dasharray:{dasharray}"\n'
 	circle_svg += f'\tid="circle_bead_{bead_name}"\n'
 	circle_svg += f'\tcx="{bead_position[0]}"\n'
 	circle_svg += f'\tcy="{bead_position[1]}"\n'
 	circle_svg += f'\tr="{_bead_radius(bead_type)*scale_factor}" />\n'
 	return ''.join(circle_svg)
+
+def _create_bond_line(start, end, color='#000000', width=2.0):
+	'''
+	Create SVG line element for a bond or constraint between two beads.
+
+	Parameters
+	----------
+	start, end : list or np.array
+		The (x, y) positions of the two beads.
+	color : str
+		Line color.
+	width : float
+		Line width.
+
+	Returns
+	-------
+	str
+		The SVG line element as a string.
+	'''
+	line_svg = ['<line\n']
+	line_svg += f'\tstyle="fill:none;stroke:{color};stroke-width:{width};stroke-linecap:round"\n'
+	line_svg += f'\tx1="{start[0]}"\n'
+	line_svg += f'\ty1="{start[1]}"\n'
+	line_svg += f'\tx2="{end[0]}"\n'
+	line_svg += f'\ty2="{end[1]}" />\n'
+	return ''.join(line_svg)
 
 def _create_bead_label(bead_position, bead_type, bead_name=None, label_position=None, scale_factor=1.0, type_color='#666666', name_color='#000000'):
 	'''
@@ -300,7 +329,7 @@ def _get_bead_coordinate(atoms, idx_map, drawer_coords, opts, bead):
 	coords = []
 	weights = []
 	for atom, data in atoms.nodes(data=True): # loop over atoms in the bead
-		if not opts.include_hydrogens_in_bead_position and data['element'] == 'H':
+		if not opts.hydrogens_in_bead_position and data['element'] == 'H':
 			continue
 		atom = idx_map[atom]
 		coords.append(drawer_coords.GetDrawCoords(atom))
