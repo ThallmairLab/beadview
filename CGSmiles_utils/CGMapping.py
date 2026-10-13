@@ -1,15 +1,17 @@
 import cgsmiles
 from cgsmiles.drawing import draw_molecule
+from fast_forward.itp_parser_sub import read_itp
 import pysmiles
 
-import warnings, io, re, os
+import warnings, io, re, os, string
 from collections.abc import Callable
 from dataclasses import dataclass, replace
 import numpy as np
 import matplotlib.pyplot as plt
 import MDAnalysis as mda
 import networkx as nx
-import vermouth
+from vermouth.pdb import read_pdb
+from vermouth.forcefield import ForceField
 from rdkit.Chem.Draw import rdMolDraw2D
 from rdkit.Geometry.rdGeometry import Point2D
 from rdkit.Chem import rdDepictor, MolToSmiles, SanitizeMol, AllChem, MolToPDBBlock
@@ -18,6 +20,7 @@ import cairosvg
 
 from .utils import cgsmiles_to_rdkit, write_file
 from .drawing_utils import _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_label, _strip_background
+from .itp_utils import itp_writer, add_comments_itp
 warnings.filterwarnings("ignore", category=UserWarning, module='MDAnalysis')  # ignore warnings from MDAnalysis about missing box dimensions
 
 REFERENCE_SCALE = 25
@@ -46,7 +49,6 @@ class DrawOptions:
 	bead_label_position: Callable = lambda pos, r, bead_name: (pos[0] + r * 1 / np.sqrt(2), pos[1] - r * 1 / np.sqrt(2)) # function to determine the position of the bead label relative to the bead position
 	# debugging
 	check_orientation: bool = False
-	
 
 	def __post_init__(self):
 		if self.include_hydrogens_in_bead_position is None:
@@ -179,7 +181,7 @@ class CGMapping:
 		mol, _ = self._build_mol(opts)
 		return MolToSmiles(mol, isomericSmiles=True)
 
-	def generate_AA_structure(self, out_file="molecule_aa.pdb", resname=None):
+	def aa_structure(self, out_file="molecule_aa.pdb", resname=None):
 		"""
 		Generate an all-atom structure file from a CGSmiles string.
 
@@ -221,16 +223,16 @@ class CGMapping:
 		else:
 			raise ValueError(f"Unsupported file type: {file_type}. Supported types are: {list(mda._SINGLEFRAME_WRITERS.keys())}")
 
-	def generate_CG_structure(self, out_file="molecule_cg.pdb", resname=None):
+	def cg_structure(self, out_file="molecule_cg.pdb", resname=None):
 
 		if '_cg' in out_file:
 			out_file_aa = out_file.replace('_cg', '_aa')
 		else:
 			out_file_aa = f'{out_file.split(".")[0]}_aa'
 		out_file_aa = f'{out_file_aa.split(".")[0]}.pdb'
-		self.generate_AA_structure(out_file_aa, resname)
+		self.aa_structure(out_file_aa, resname)
 
-		mol = vermouth.pdb.read_pdb(out_file_aa)[0]
+		mol = read_pdb(out_file_aa)[0]
 
 		mapping = next(nx.isomorphism.GraphMatcher(mol, self.aa_graph).match())
 
@@ -284,4 +286,87 @@ class CGMapping:
 		else:
 			raise ValueError(f"Unsupported file type: {out_file.split('.')[-1]}. Supported types are: {list(mda._SINGLEFRAME_WRITERS.keys())}")
 	
+	def change_bead_types(self, bead_change):
+		'''
+		bead_change is a dictionary with the format {name: new_type}
+		'''
+		cg = self.cgs_string.split('}.{')[0][1:]
+		aa = self.cgs_string.split('}.{')[1][:-1]
+
+		# split the cg part into its components
+		cg = [part.split('[') for part in cg.split(']')]
+		cg = [item for sublist in cg for item in sublist if item]
+		indices = [i for i, part in enumerate(cg) if part.startswith('#')] # get the indices of the beads in the cg part
+		types = []
+		names = []
+		for i in indices:
+			tokens = cg[i].split(';')
+			for token in tokens:
+				if token.startswith('#'):
+					types.append(token[1:])
+				if token.startswith('n='):
+					names.append(token[2:])
+		types_initial = types.copy()
+		# check if names are unique
+		if len(names) != len(set(names)):
+			raise ValueError("Names in the CGSmiles string are not unique")
+
+		non_unique_count = 0
+		letters = list(reversed(string.ascii_uppercase))
+		# change types according to the bead_change
+		new_aa_parts = []
+		for name, type_ in bead_change.items():
+			idx = names.index(name)
+			if type_ != types[idx]: # change type
+				new_type = f'{type_}{letters[non_unique_count]}' if type_ in types_initial else type_ # add letter if the type is already present in the cg part
+				for part in aa.split(','):
+					if part.startswith(f'#{types[idx]}'):
+						new_aa_parts.append(part.replace(f'#{types[idx]}', f'#{new_type}')) # copy the part with the new type 
+				types[idx] = new_type
+				non_unique_count += 1 if type_ in types else 0
+
+		# assembling the aa string again
+		aa = ','.join(new_aa_parts) + ',' + aa if new_aa_parts else aa
+
+		# assembling the cg string again
+		for i, idx in enumerate(indices):
+			cg[idx] = f'[#{types[i]};n={names[i]}]'
+		cg_string = ''.join(cg)
+		self.cgs_string = f'{{{cg_string}}}.{{{aa}}}'
+
+		self.cg_graph, self.aa_graph = (
+			cgsmiles.MoleculeResolver.from_string(self.cgs_string).resolve()
+		)
+		self._clean_cg_graph()
+		return self.cgs_string
+
+	def read_itp(self, path_in, molname=None):
+		with open(f'{path_in}') as f:
+			lines = f.readlines()
 	
+		self.ff = ForceField("dummy")
+		read_itp(lines, self.ff)
+		if molname is not None:
+			if molname not in self.ff.blocks:
+				raise ValueError(f"Molname {molname} not found in the ITP file.")
+			self.molname = molname
+		else:
+			self.molname = list(self.ff.blocks.keys())[0]
+
+	def change_itp(self):
+		comments = {}
+		for node, d in self.ff.blocks[self.molname].nodes(data=True):
+			cg_node = next((n for n, attrs in self.cg_graph.nodes(data=True) if attrs["atomname"] == d["atomname"]), None)
+			if cg_node is None:
+				raise ValueError("No matching node found in cg_graph for node {} in ff.blocks".format(node))
+			if d['atype'] != self.cg_graph.nodes[cg_node]["atype"]:
+				comments[node] = f"changed from {self.cg_graph.nodes[cg_node]['atype']} to {d['atype']}"
+				d['atype'] = self.cg_graph.nodes[cg_node]["atype"]
+		return comments
+
+	def write_itp(self, path_out, outname=None):
+		comments = self.change_itp()
+		outname = outname if outname else self.molname
+	
+		itp_writer(outname, self.ff.blocks[self.molname], self.cgs_string, path_out)	
+		add_comments_itp(comments, f'{path_out}/{outname}.itp')
