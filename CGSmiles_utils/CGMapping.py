@@ -18,7 +18,7 @@ from PIL import Image
 import cairosvg
 
 from .utils import cgsmiles_to_rdkit
-from .drawing_utils import _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_label, _create_bond_line, _create_polyline, _offset_path, _strip_background
+from .drawing_utils import _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_label, _create_bond_line, _create_polyline, _offset_path, _offset_side, _strip_background
 from .itp_utils import itp_writer, add_comments_itp
 warnings.filterwarnings("ignore", category=UserWarning, module='MDAnalysis')  # ignore warnings from MDAnalysis about missing box dimensions
 
@@ -45,14 +45,15 @@ class DrawOptions:
 	show_node_indicators: bool = False
 	show_bonds: bool = False # draw bonds and constraints from the ITP loaded with read_itp()
 	bond_color: str = '#000000'
-	constraint_color: str = "#0400FF"
+	constraint_color: str = "#020070FF"
 	show_angles: bool = False # draw angles from the ITP as bent lines offset from the beads
-	angle_color: str = "#FF0000"
-	angle_offset: float = 8.0 # distance between an angle line and the bonds it follows
+	angle_color: str = "#286E8D"
+	angle_offset: float = 8.0 # distance between an angle line and the bonds it follows, positive = away from the centroid of all beads
 	show_dihedrals: bool = False # draw dihedrals from the ITP as lines through the four beads
-	dihedral_color: str = '#000000'
-	dihedral_offset: float = 8.0 # distance between a dihedral line and the bonds it follows
+	dihedral_color: str = '#286E8D'
+	dihedral_offset: float = 8.0 # distance between a dihedral line and the bonds it follows, positive = away from the centroid of all beads
 	cg_line_width: float = 2.0 # line width for bonds, constraints, angles and dihedrals
+	line_spacing: float = 4.0 # distance between angle/dihedral lines that would otherwise overlap
 	include_hydrogens_in_bead_position: bool | None = None # None follows show_hydrogens
 	bead_type_label_color : str = '#666666'
 	bead_name_label_color : str = '#000000'
@@ -154,24 +155,28 @@ class CGMapping:
 		below, above = [], [] # bonds and angles are drawn below the beads, dihedrals on top
 		if opts.show_bonds:
 			below += self._draw_cg_bonds(bead_positions, opts, hidden)
-		if opts.show_angles:
-			below += self._draw_cg_angles(bead_positions, opts, hidden)
-		if opts.show_dihedrals:
-			above += self._draw_cg_dihedrals(bead_positions, opts, hidden)
+		angles, dihedrals = self._draw_cg_angles_dihedrals(bead_positions, opts, hidden)
+		below += angles
+		above += dihedrals
 		return svg.replace('</svg>', ''.join(below) + ''.join(beads) + ''.join(above) + ''.join(labels) + '</svg>')
 
 	def _itp_cg_interactions(self, interaction_type, hidden=()):
 		'''
 		Yield the cg_graph nodes of each interaction of the given type in the loaded ITP,
-		skipping interactions that involve hidden nodes.
+		skipping interactions that involve hidden nodes. Interactions between the same beads
+		(in the same or reversed order, e.g. multiple dihedral terms) are only yielded once.
 		'''
 		if self.ff is None:
 			raise RuntimeError("No ITP loaded, call read_itp() first.")
 		itp_to_cg = self._itp_to_cg_nodes()
+		seen = set()
 		for interaction in self.ff.blocks[self.molname].interactions.get(interaction_type, []):
 			nodes = [itp_to_cg[atom] for atom in interaction.atoms]
-			if not any(node in hidden for node in nodes):
-				yield nodes
+			key = min(tuple(nodes), tuple(reversed(nodes)))
+			if key in seen or any(node in hidden for node in nodes):
+				continue
+			seen.add(key)
+			yield nodes
 
 	def _draw_cg_bonds(self, bead_positions, opts, hidden=()):
 		'''
@@ -197,27 +202,50 @@ class CGMapping:
 					color=color, width=opts.cg_line_width * opts.scale_factor))
 		return lines
 
-	def _draw_cg_angles(self, bead_positions, opts, hidden=()):
+	def _draw_cg_angles_dihedrals(self, bead_positions, opts, hidden=()):
 		'''
-		Create SVG polylines for the angles of the loaded ITP. Each angle is drawn as a bent line
-		that follows its two bonds, shifted by opts.angle_offset to the inside of the angle.
-		Parameters and return value as in _draw_cg_bonds.
-		'''
-		return [_create_polyline(
-					_offset_path([bead_positions[n] for n in nodes], offset=opts.angle_offset * opts.scale_factor),
-					color=opts.angle_color, width=opts.cg_line_width * opts.scale_factor)
-				for nodes in self._itp_cg_interactions('angles', hidden)]
+		Create SVG polylines for the angles and dihedrals (including impropers) of the loaded ITP, depending on
+		opts.show_angles and opts.show_dihedrals. Each one is drawn as a line along its bonds, shifted by
+		opts.angle_offset or opts.dihedral_offset away from the centroid of all beads. Where lines would overlap
+		on a bond, the offset of the later line is increased in steps of opts.line_spacing; angles are placed first.
 
-	def _draw_cg_dihedrals(self, bead_positions, opts, hidden=()):
+		Parameters
+		----------
+		bead_positions : dict
+			Drawing coordinates of the beads, keyed by cg_graph node.
+		opts : DrawOptions
+		hidden : set
+			cg_graph nodes that are not drawn; interactions involving them are skipped.
+
+		Returns
+		-------
+		tuple of list of str
+			The SVG polyline elements for the angles and for the dihedrals.
 		'''
-		Create SVG polylines for the dihedrals (including impropers) of the loaded ITP. Each dihedral is
-		drawn as a line along its three bonds, shifted by opts.dihedral_offset to the side the path turns towards.
-		Parameters and return value as in _draw_cg_bonds.
-		'''
-		return [_create_polyline(
-					_offset_path([bead_positions[n] for n in nodes], offset=opts.dihedral_offset * opts.scale_factor),
-					color=opts.dihedral_color, width=opts.cg_line_width * opts.scale_factor)
-				for nodes in self._itp_cg_interactions('dihedrals', hidden)]
+		centroid = np.mean(list(bead_positions.values()), axis=0)
+		spacing = opts.line_spacing * opts.scale_factor
+		occupied = {} # (bond, side) -> distances of the lines already placed along that bond on that side
+		def place(nodes, offset, color):
+			points = [bead_positions[n] for n in nodes]
+			side = _offset_side(points, offset, centroid)
+			# side relative to each bond in a fixed direction (lower node first), so lines on different paths can be compared
+			lanes = [((a, b), side) if a < b else ((b, a), -side) for a, b in zip(nodes[:-1], nodes[1:])]
+			taken = [d for lane in lanes for d in occupied.get(lane, [])]
+			distance = abs(offset)
+			while any(abs(distance - d) < spacing - 1e-9 for d in taken):
+				distance += spacing
+			for lane in lanes:
+				occupied.setdefault(lane, []).append(distance)
+			return _create_polyline(_offset_path(points, distance, side), color=color, width=opts.cg_line_width * opts.scale_factor)
+
+		angles, dihedrals = [], []
+		if opts.show_angles:
+			angles = [place(nodes, opts.angle_offset * opts.scale_factor, opts.angle_color)
+					  for nodes in self._itp_cg_interactions('angles', hidden)]
+		if opts.show_dihedrals:
+			dihedrals = [place(nodes, opts.dihedral_offset * opts.scale_factor, opts.dihedral_color)
+						 for nodes in self._itp_cg_interactions('dihedrals', hidden)]
+		return angles, dihedrals
 
 	def to_svg(self, **kwargs) -> str:
 		opts = replace(kwargs.pop("opts", None) or DrawOptions(), **kwargs)

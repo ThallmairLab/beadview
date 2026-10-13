@@ -216,20 +216,19 @@ def _create_polyline(points, color='#000000', width=2.0):
 	polyline_svg += f'\tpoints="{points_str}" />\n'
 	return ''.join(polyline_svg)
 
-def _offset_path(points, offset, trim=0.2):
+def _offset_path(points, distance, side):
 	'''
-	Points of a line that follows the path through the given points, shifted by offset to the side
-	the path turns towards (the inside of an angle). The outer ends are pulled back towards their
-	neighbors by the fraction trim of the first and last segment.
+	Points of a line that follows the path through the given points, shifted by distance to one side.
+	The line ends next to the centers of the first and last bead.
 
 	Parameters
 	----------
 	points : list of list or np.array
 		The (x, y) positions of the beads along the path (3 for angles, 4 for dihedrals).
-	offset : float
+	distance : float
 		Distance between the line and the path.
-	trim : float
-		Fraction of the first and last segment by which the line is shortened at its ends.
+	side : int
+		+1 to shift to the left of the path direction (first to last point), -1 to the right.
 
 	Returns
 	-------
@@ -238,18 +237,31 @@ def _offset_path(points, offset, trim=0.2):
 	'''
 	points = [np.asarray(p, dtype=float) for p in points]
 	directions = [b - a for a, b in zip(points[:-1], points[1:])]
-	normals = [np.array([-d[1], d[0]]) / np.linalg.norm(d) for d in directions]
-	turn = sum(d1[0] * d2[1] - d1[1] * d2[0] for d1, d2 in zip(directions[:-1], directions[1:]))
-	normals = [n if turn >= 0 else -n for n in normals]
-
-	path = [points[0] + trim * directions[0] + offset * normals[0]]
-	for point, n1, n2 in zip(points[1:-1], normals[:-1], normals[1:]):
-		# corner where the two shifted segments meet; limited for very sharp turns
+	normals = [side * np.array([-d[1], d[0]]) / np.linalg.norm(d) for d in directions]
+	path = [points[0] + distance * normals[0]]
+	for point, d1, d2, n1, n2 in zip(points[1:-1], directions[:-1], directions[1:], normals[:-1], normals[1:]):
 		cos = np.dot(n1, n2)
-		scale = offset * min(1 / (1 + cos), 3 / np.linalg.norm(n1 + n2)) if 1 + cos > 1e-6 else 0
-		path.append(point + scale * (n1 + n2) if scale else point + offset * n1)
-	path.append(points[-1] - trim * directions[-1] + offset * normals[-1])
+		outer = side * (d1[0] * d2[1] - d1[1] * d2[0]) < 0 # the line runs around the outside of this corner
+		if outer and 1 + cos < 2 / 1.5**2: # miter longer than 1.5 * distance: cut the corner off
+			path += [point + distance * n1, point + distance * n2]
+		elif 1 + cos > 1e-6:
+			# corner where the two shifted segments meet; limited for very sharp turns
+			path.append(point + distance * min(1 / (1 + cos), 3 / np.linalg.norm(n1 + n2)) * (n1 + n2))
+		else:
+			path.append(point + distance * n1)
+	path.append(points[-1] + distance * normals[-1])
 	return path
+
+def _offset_side(points, offset, away_from):
+	'''
+	Side (+1 left, -1 right of the path direction) to which a path has to be shifted to move away
+	from the point away_from, or towards it for a negative offset. See _offset_path.
+	'''
+	away_from = np.asarray(away_from, dtype=float)
+	def mean_distance(side):
+		return np.mean([np.linalg.norm(p - away_from) for p in _offset_path(points, abs(offset), side)])
+	further = 1 if mean_distance(1) >= mean_distance(-1) else -1
+	return further if offset >= 0 else -further
 
 def _create_bead_label(bead_position, bead_type, bead_name=None, label_position=None, scale_factor=1.0, type_color='#666666', name_color='#000000'):
 	'''
