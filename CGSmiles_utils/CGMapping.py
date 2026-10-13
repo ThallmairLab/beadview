@@ -61,6 +61,14 @@ class CGMapping:
 		self.cg_graph, self.aa_graph = (
 			cgsmiles.MoleculeResolver.from_string(cgs_string).resolve()
 		)
+		self._clean_cg_graph()
+
+	def _clean_cg_graph(self):
+		for n, data in self.cg_graph.nodes(data=True):
+			if data["fragname"][-1].isupper() and len(data["fragname"]) > 1: # remove trailing letters from fragname except for virtual sites
+				data["fragname"] = data["fragname"][:-1]
+			data["atype"] = data["fragname"]
+			data["atomname"] = data["n"]
 
 	def _build_mol(self, opts):
 		mol, idx_map = cgsmiles_to_rdkit(self.aa_graph, add_hydrogens=opts.show_hydrogens)
@@ -100,8 +108,6 @@ class CGMapping:
 			if bead in virtual_edges:   # virtual nodes are placed afterwards
 				continue
 			bead_type = data['fragname']
-			if (not opts.show_node_indicators and len(bead_type) > 1 and bead_type[-1].isupper()):
-				bead_type = bead_type[:-1]
 			pos = _get_bead_coordinate(data['graph'], idx_map, drawer_coords, opts, bead)
 			bead_positions[bead] = pos
 			add_bead(pos, bead_type, data.get('n'))
