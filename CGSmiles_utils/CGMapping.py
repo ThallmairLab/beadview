@@ -3,7 +3,7 @@ from cgsmiles.drawing import draw_molecule
 from fast_forward.itp_parser_sub import read_itp
 import pysmiles
 
-import warnings, io, re, string
+import warnings, io, re, string, os, logging
 from pathlib import Path
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -14,6 +14,9 @@ from vermouth.forcefield import ForceField
 from rdkit.Chem.Draw import rdMolDraw2D
 from rdkit.Geometry.rdGeometry import Point2D
 from rdkit.Chem import rdDepictor, MolToSmiles, SanitizeMol, AllChem, MolToPDBBlock
+from rdkit.Chem.Draw import IPythonConsole
+from IPython.display import display
+from pkasolver.query import draw_pka_map, draw_pka_reactions, calculate_microstate_pka_values
 from PIL import Image
 import cairosvg
 
@@ -23,6 +26,25 @@ from .itp_utils import itp_writer, add_comments_itp
 warnings.filterwarnings("ignore", category=UserWarning, module='MDAnalysis')  # ignore warnings from MDAnalysis about missing box dimensions
 
 REFERENCE_SCALE = 25
+
+class suppress_output:
+    def __enter__(self):
+        # open devnull
+        self._null_fd = os.open(os.devnull, os.O_RDWR)
+        # save real stdout/stderr file descriptors
+        self._save_stdout = os.dup(1)
+        self._save_stderr = os.dup(2)
+        # replace them with devnull
+        os.dup2(self._null_fd, 1)
+        os.dup2(self._null_fd, 2)
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        # restore stdout/stderr
+        os.dup2(self._save_stdout, 1)
+        os.dup2(self._save_stderr, 2)
+        os.close(self._null_fd)
+        os.close(self._save_stdout)
+        os.close(self._save_stderr)
 
 @dataclass
 class DrawOptions:
@@ -499,3 +521,35 @@ class CGMapping:
 	
 		itp_writer(outname, self.ff.blocks[self.molname], self.cgs_string, path_out)	
 		add_comments_itp(comments, f'{path_out}/{outname}.itp')
+
+	### PKa prediction methods
+	def predict_pka(self, show_protontation_reactions=False, show_protonation_map=True, print_pka_values=False):
+		"""
+		Predict the pKa values of the molecule.
+
+		Returns
+		-------
+		dict
+			A dictionary with predicted pKa values and associated information.
+		"""
+		mol, _ = self._build_mol(opts=DrawOptions())
+
+		warnings.filterwarnings("ignore", category=FutureWarning)
+		logging.disable(logging.CRITICAL)
+
+		with suppress_output():
+			pka_results = calculate_microstate_pka_values(mol)
+		
+		IPythonConsole.molSize = 400,400
+		if show_protontation_reactions:
+			print('Drawing pKa reaction network...')
+			display(draw_pka_reactions(pka_results))
+
+		if show_protonation_map:
+			print('Drawing pKa map...')
+			display(draw_pka_map(pka_results))
+
+		if print_pka_values:
+			for state in pka_results:
+				print(f'pKa = {state.pka}')
+		return pka_results
