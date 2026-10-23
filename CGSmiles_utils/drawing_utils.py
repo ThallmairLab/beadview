@@ -263,6 +263,41 @@ def _offset_side(points, offset, away_from):
 	further = 1 if mean_distance(1) >= mean_distance(-1) else -1
 	return further if offset >= 0 else -further
 
+def _bead_label_lines(bead_type, bead_name=None):
+	'''
+	Lines of a bead label from top to bottom as (text, is_type) tuples.
+	Virtual nodes ('U') with a name only show the name, other beads show the name above the type.
+	'''
+	if bead_type == 'U' and bead_name is not None:
+		return [(bead_name, True)]
+	if not bead_type.startswith('U') and bead_name is not None:
+		return [(bead_name, False), (bead_type, True)]
+	return [(bead_type, True)]
+
+def _bead_label_extent(bead_type, bead_name=None, scale_factor=1.0):
+	'''
+	Approximate extent of a bead label relative to its anchor (left end of the baseline of the last line).
+
+	Returns
+	-------
+	tuple of float
+		(width, above, below): the label spans x to x + width and y - above to y + below.
+	'''
+	fontsize = 13 * scale_factor
+	lines = _bead_label_lines(bead_type, bead_name)
+	width = 0.62 * fontsize * max(len(text) for text, _ in lines) # average glyph width of sans-serif fonts
+	above = (len(lines) - 1) * fontsize + 0.75 * fontsize # cap height of the top line
+	below = 0.2 * fontsize # descenders
+	return width, above, below
+
+def _label_above_bead(bead_type, bead_name=None, scale_factor=1.0, gap=1.0):
+	'''
+	label_position function (see _create_bead_label) that centers the label horizontally on the bead
+	with its baseline just above the top edge of the bead.
+	'''
+	width, _, _ = _bead_label_extent(bead_type, bead_name, scale_factor)
+	return lambda pos, r, bead_name: (pos[0] - width / 2, pos[1] - r - gap * scale_factor)
+
 def _create_bead_label(bead_position, bead_type, bead_name=None, label_position=None, scale_factor=1.0, type_color='#666666', name_color='#000000'):
 	'''
 	Create SVG text element for a bead label.
@@ -275,6 +310,9 @@ def _create_bead_label(bead_position, bead_type, bead_name=None, label_position=
 		The bead type/name.
 	bead_name : str, optional, default: None
 		The bead name to display above the bead type. If None, only the bead type is shown.
+	label_position : callable, optional, default: None
+		Function (bead_position, bead_radius, bead_name) -> (x, y) of the label anchor
+		(left end of the baseline of the last line). Defaults to the upper right of the bead.
 	type_color : str, optional, default: '#666666'
 		The color of the bead type text in hex format.
 	name_color : str, optional, default: '#000000'
@@ -286,14 +324,11 @@ def _create_bead_label(bead_position, bead_type, bead_name=None, label_position=
 		The SVG text element as a string.
 	'''
 	fontsize = 13 * scale_factor  # base font size scaled by the scale factor
-	if bead_type == 'U' and bead_name is not None: # only show bead name in black
-		type_color = name_color # use black color for virtual nodes
-		bead_type = bead_name
-
 	if label_position is None:
 		offset = 1 / np.sqrt(2)
 		label_position = lambda pos, r, bead_name: (pos[0] + r * offset, pos[1] - r * offset)
 	position = label_position(bead_position, _bead_radius(bead_type) * scale_factor, bead_name)
+	lines = _bead_label_lines(bead_type, bead_name)
 	
 	# define text element
 	text_svg = ['<text\n']
@@ -302,13 +337,152 @@ def _create_bead_label(bead_position, bead_type, bead_name=None, label_position=
 	text_svg.append(f'\tx="{position[0]}"\n')
 	text_svg.append(f'\ty="{position[1]}">\n')
 
-	# define tspan element for bead name if given
-	if not bead_type.startswith('U') and bead_name is not None:
-		text_svg.append(f'\t<tspan x="{position[0]}" y="{position[1]-fontsize}" font-size="{fontsize}px" fill="{name_color}" font-family="sans-serif">{bead_name}</tspan>\n')
-	# define tspan element for bead type
-	text_svg.append(f'\t<tspan x="{position[0]}" y="{position[1]}" font-size="{fontsize}px" fill="{type_color}" font-family="sans-serif">{bead_type}</tspan>\n')
+	# one tspan per line, the bead type in type_color (virtual nodes show only their name, in name_color)
+	for i, (text, is_type) in enumerate(lines):
+		y = position[1] - (len(lines) - 1 - i) * fontsize
+		color = type_color if is_type and not (bead_type == 'U' and bead_name is not None) else name_color
+		text_svg.append(f'\t<tspan x="{position[0]}" y="{y}" font-size="{fontsize}px" fill="{color}" font-family="sans-serif">{text}</tspan>\n')
 	text_svg.append('</text>\n')
 	return ''.join(text_svg)
+
+def _point_segment_distances(points, segments):
+	'''
+	Distances between each point and each line segment.
+
+	Parameters
+	----------
+	points : np.array, shape (N, 2)
+	segments : np.array, shape (S, 2, 2)
+
+	Returns
+	-------
+	np.array, shape (N, S)
+	'''
+	a, b = segments[:, 0], segments[:, 1]
+	ab = b - a
+	length2 = np.maximum(np.sum(ab**2, axis=1), 1e-12)
+	ap = points[:, None, :] - a[None, :, :]
+	t = np.clip(np.sum(ap * ab[None], axis=2) / length2[None], 0, 1)
+	closest = a[None] + t[..., None] * ab[None]
+	return np.linalg.norm(points[:, None, :] - closest, axis=2)
+
+def _optimize_label_positions(bead_positions, bead_radii, label_sizes, circles, segments, canvas_size, gap,
+							  fixed_centers=None, n_directions=24, n_rings=3, max_sweeps=20):
+	'''
+	Place one rectangular label next to each bead such that the labels overlap as little as possible
+	with each other, with the beads and with the obstacles of the underlying structure.
+
+	Each label can be placed at n_directions directions around its bead and n_rings distances from it.
+	The overlap of a candidate with the beads, circles, segments and the area outside the canvas is
+	estimated on a grid of points inside the label, the overlap with other labels from the exact
+	intersection area. Labels are first placed independently and then repeatedly moved to their best
+	position given the other labels until no label moves anymore.
+
+	Parameters
+	----------
+	bead_positions : np.array, shape (B, 2)
+		Centers of the beads.
+	bead_radii : np.array, shape (B,)
+		Radii of the beads.
+	label_sizes : np.array, shape (B, 2)
+		Width and height of the label of each bead.
+	circles : np.array, shape (C, 3)
+		Circular obstacles (x, y, radius), e.g. atom labels.
+	segments : np.array, shape (S, 5)
+		Line obstacles (x1, y1, x2, y2, half width), e.g. bonds.
+	canvas_size : tuple
+		Width and height of the drawing; area outside is avoided.
+	gap : float
+		Clearance kept between labels and their own bead and to all obstacles.
+	fixed_centers : dict, optional, default: None
+		Centers of labels that are not moved, keyed by bead index. They are still avoided by the other labels.
+
+	Returns
+	-------
+	np.array, shape (B, 2)
+		Centers of the labels.
+	'''
+	bead_positions = np.asarray(bead_positions, dtype=float).reshape(-1, 2)
+	bead_radii = np.asarray(bead_radii, dtype=float)
+	label_sizes = np.asarray(label_sizes, dtype=float).reshape(-1, 2)
+	circles = np.asarray(circles, dtype=float).reshape(-1, 3)
+	segments = np.asarray(segments, dtype=float).reshape(-1, 5)
+	n_labels = len(bead_positions)
+	if n_labels == 0:
+		return bead_positions.copy()
+
+	# candidate directions, starting at the upper right (the default position), y points down in SVG
+	angles = -np.pi / 4 + 2 * np.pi * np.arange(n_directions) / n_directions
+	directions = np.stack([np.cos(angles), np.sin(angles)], axis=1)
+	# shift the label by half its size along the direction so that its edge (or corner) faces the bead
+	corner = np.clip(directions * np.sqrt(2), -1, 1)
+	ring_steps = np.arange(n_rings)
+
+	# weights of the different kinds of overlap and of small preferences that break ties
+	w_label, w_canvas, w_bead, w_circle, w_segment = 4.0, 4.0, 2.0, 1.5, 1.0
+	w_ring, w_direction = 0.05, 0.02
+
+	grid = np.stack(np.meshgrid(np.linspace(-0.5, 0.5, 8), np.linspace(-0.5, 0.5, 4)), axis=-1).reshape(-1, 2)
+	candidates, static_costs = [], []
+	fixed_centers = fixed_centers or {}
+	for i in range(n_labels):
+		if i in fixed_centers:
+			candidates.append(np.asarray(fixed_centers[i], dtype=float).reshape(1, 2))
+			static_costs.append(np.zeros(1))
+			continue
+		size = label_sizes[i]
+		ring_distance = bead_radii[i] + gap + ring_steps * 0.5 * size[1]
+		centers = (bead_positions[i][None, None] + ring_distance[:, None, None] * directions[None]
+				   + corner[None] * size / 2).reshape(-1, 2) # (rings * directions, 2)
+		points = (centers[:, None] + grid[None] * size).reshape(-1, 2)
+		n_points = len(grid)
+
+		def fraction(inside):
+			return inside.reshape(len(centers), n_points).mean(axis=1)
+
+		cost = np.zeros(len(centers))
+		# beads, including the own one when a label would be pushed into it
+		d = np.linalg.norm(points[:, None] - bead_positions[None], axis=2)
+		cost += w_bead * fraction(np.any(d < bead_radii[None] + gap, axis=1))
+		if len(circles):
+			d = np.linalg.norm(points[:, None] - circles[None, :, :2], axis=2)
+			cost += w_circle * fraction(np.any(d < circles[None, :, 2] + gap, axis=1))
+		if len(segments):
+			d = _point_segment_distances(points, segments[:, :4].reshape(-1, 2, 2))
+			cost += w_segment * fraction(np.any(d < segments[None, :, 4] + gap, axis=1))
+		outside = (points[:, 0] < 0) | (points[:, 1] < 0) | (points[:, 0] > canvas_size[0]) | (points[:, 1] > canvas_size[1])
+		cost += w_canvas * fraction(outside)
+		cost += w_ring * np.repeat(ring_steps, n_directions)
+		cost += w_direction * np.tile((1 - np.cos(angles - angles[0])) / 2, n_rings)
+		candidates.append(centers)
+		static_costs.append(cost)
+
+	def label_overlap(i, centers, choice):
+		'''Intersection area of candidate labels of label i with all other placed labels, relative to the label area.'''
+		others = [j for j in range(n_labels) if j != i]
+		if not others:
+			return np.zeros(len(centers))
+		other_centers = np.array([candidates[j][choice[j]] for j in others])
+		half = (label_sizes[i] + gap) / 2
+		other_half = (label_sizes[others] + gap) / 2
+		overlap = np.clip(np.minimum(centers[:, None] + half, other_centers[None] + other_half)
+						  - np.maximum(centers[:, None] - half, other_centers[None] - other_half), 0, None)
+		return np.prod(overlap, axis=2).sum(axis=1) / np.prod(label_sizes[i] + gap)
+
+	choice = [int(np.argmin(cost)) for cost in static_costs]
+	for _ in range(max_sweeps):
+		costs = [static_costs[i] + w_label * label_overlap(i, candidates[i], choice) for i in range(n_labels)]
+		moved = False
+		# the labels in the worst position move first
+		for i in sorted(range(n_labels), key=lambda i: -costs[i][choice[i]]):
+			cost = static_costs[i] + w_label * label_overlap(i, candidates[i], choice)
+			best = int(np.argmin(cost))
+			if cost[best] < cost[choice[i]] - 1e-9:
+				choice[i] = best
+				moved = True
+		if not moved:
+			break
+	return np.array([candidates[i][choice[i]] for i in range(n_labels)])
 
 def detect_virtual_nodes(resgraph):
 	"""

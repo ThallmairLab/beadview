@@ -21,7 +21,7 @@ from PIL import Image
 import cairosvg
 
 from .utils import cgsmiles_to_rdkit
-from .drawing_utils import _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_label, _create_bond_line, _create_polyline, _offset_path, _offset_side, _strip_background
+from .drawing_utils import _bead_radius, _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_label, _bead_label_extent, _label_above_bead, _optimize_label_positions, _create_bond_line, _create_polyline, _offset_path, _offset_side, _strip_background
 from .itp_utils import itp_writer, add_comments_itp
 warnings.filterwarnings("ignore", category=UserWarning, module='MDAnalysis')  # ignore warnings from MDAnalysis about missing box dimensions
 
@@ -80,6 +80,8 @@ class DrawOptions:
 	bead_type_label_color : str = '#666666'
 	bead_name_label_color : str = '#000000'
 	bead_label_position: Callable = lambda pos, r, bead_name: (pos[0] + r * 1 / np.sqrt(2), pos[1] - r * 1 / np.sqrt(2)) # function to determine the position of the bead label relative to the bead position
+	optimize_bead_labels: bool = False # place bead labels around their beads to minimize overlap with other labels, beads, the molecule and the drawn bonds/angles/dihedrals; overrides bead_label_position
+	# labels of dummy beads (type U) are always placed right above the bead
 	# debugging
 	check_orientation: bool = False
 
@@ -146,17 +148,14 @@ class CGMapping:
 		virtual_edges = detect_virtual_nodes(self.cg_graph)
 		bead_positions = {}
 		beads = [] 
-		labels = [] 
+		labeled = [] # (position, bead_type, bead_name) of the drawn beads
+		labeled_dummies = [] # indices into labeled of the dummy beads
 		itp_vs = self._itp_virtual_sites() if opts.indicate_vs and self.ff is not None else set()
 		def add_bead(bead, position, bead_type, bead_name):
 			beads.append(_create_bead_circle(position, bead_type, bead_name, opts.scale_factor, dashed=bead in itp_vs))
-			if opts.show_bead_labels:
-				labels.append(_create_bead_label(
-					position, bead_type, bead_name=bead_name,
-					label_position=opts.bead_label_position,
-					scale_factor=opts.scale_factor,
-					type_color=opts.bead_type_label_color,
-					name_color=opts.bead_name_label_color))
+			if bead_type.startswith('U'):
+				labeled_dummies.append(len(labeled))
+			labeled.append((position, bead_type, bead_name))
 
 		for bead, data in self.cg_graph.nodes(data=True):
 			if bead in virtual_edges:   # virtual nodes are placed afterwards
@@ -180,7 +179,90 @@ class CGMapping:
 		angles, dihedrals = self._draw_cg_angles_dihedrals(bead_positions, opts, hidden)
 		below += angles
 		above += dihedrals
+
+		labels = []
+		if opts.show_bead_labels:
+			label_positions = [opts.bead_label_position] * len(labeled)
+			for i in labeled_dummies:
+				_, bead_type, bead_name = labeled[i]
+				label_positions[i] = _label_above_bead(bead_type, bead_name, opts.scale_factor)
+			if opts.optimize_bead_labels:
+				label_positions = self._optimize_bead_labels(mol, drawer_coords, labeled, bead_positions, opts, hidden, fixed=labeled_dummies)
+			for (position, bead_type, bead_name), label_position in zip(labeled, label_positions):
+				labels.append(_create_bead_label(
+					position, bead_type, bead_name=bead_name,
+					label_position=label_position,
+					scale_factor=opts.scale_factor,
+					type_color=opts.bead_type_label_color,
+					name_color=opts.bead_name_label_color))
 		return svg.replace('</svg>', ''.join(below) + ''.join(beads) + ''.join(above) + ''.join(labels) + '</svg>')
+
+	def _optimize_bead_labels(self, mol, drawer_coords, labeled, bead_positions, opts, hidden=(), fixed=()):
+		'''
+		Find label positions that minimize the overlap of the bead labels with each other, with the beads,
+		with the bonds and atom labels of the molecule and with the drawn bonds, angles and dihedrals.
+
+		Parameters
+		----------
+		mol : rdkit.Chem.rdchem.Mol
+			The drawn molecule.
+		drawer_coords : rdMolDraw2D.MolDraw2DSVG
+			Drawer the molecule was drawn with, to get the drawing coordinates of the atoms.
+		labeled : list of tuple
+			(position, bead_type, bead_name) of each drawn bead.
+		bead_positions : dict
+			Drawing coordinates of the beads, keyed by cg_graph node.
+		opts : DrawOptions
+		hidden : set
+			cg_graph nodes that are not drawn.
+		fixed : list of int
+			Indices into labeled of the labels that are placed right above their bead instead.
+
+		Returns
+		-------
+		list of callable
+			One label_position function per entry of labeled, see _create_bead_label.
+		'''
+		atoms = np.array([list(drawer_coords.GetDrawCoords(i)) for i in range(mol.GetNumAtoms())]).reshape(-1, 2)
+		bonds = [(b.GetBeginAtomIdx(), b.GetEndAtomIdx()) for b in mol.GetBonds()]
+		bond_length = np.median([np.linalg.norm(atoms[i] - atoms[j]) for i, j in bonds]) if bonds else REFERENCE_SCALE * opts.scale_factor
+		# atoms drawn with a label (heteroatoms, or every atom when indices are shown); wider if hydrogens are attached
+		circles = [(*atoms[a.GetIdx()], (0.4 if a.GetTotalNumHs() else 0.3) * bond_length) for a in mol.GetAtoms()
+				   if a.GetSymbol() != 'C' or opts.show_atom_indices]
+		segments = [(*atoms[i], *atoms[j], opts.bond_width * opts.scale_factor) for i, j in bonds]
+
+		# drawn bonds, angles and dihedrals as segments between the beads, as wide as the lines run next to them
+		cg_width = opts.cg_line_width * opts.scale_factor
+		if self.ff is not None:
+			for option, interaction_types, width in (
+					('show_bonds', ('bonds', 'constraints'), cg_width / 2),
+					('show_angles', ('angles',), opts.angle_offset * opts.scale_factor + cg_width),
+					('show_dihedrals', ('dihedrals',), opts.dihedral_offset * opts.scale_factor + cg_width)):
+				if not getattr(opts, option):
+					continue
+				for interaction_type in interaction_types:
+					for nodes in self._itp_cg_interactions(interaction_type, hidden):
+						segments += [(*bead_positions[a], *bead_positions[b], abs(width)) for a, b in zip(nodes[:-1], nodes[1:])]
+
+		extents = [_bead_label_extent(bead_type, bead_name, opts.scale_factor) for _, bead_type, bead_name in labeled]
+		fixed_centers = {}
+		for i in fixed:
+			position, bead_type, bead_name = labeled[i]
+			x, y = _label_above_bead(bead_type, bead_name, opts.scale_factor)(position, _bead_radius(bead_type) * opts.scale_factor, bead_name)
+			width, above, below = extents[i]
+			fixed_centers[i] = (x + width / 2, y - (above - below) / 2)
+		centers = _optimize_label_positions(
+			bead_positions=[position for position, _, _ in labeled],
+			bead_radii=[_bead_radius(bead_type) * opts.scale_factor for _, bead_type, _ in labeled],
+			label_sizes=[(width, above + below) for width, above, below in extents],
+			circles=circles,
+			segments=segments,
+			canvas_size=opts.canvas_size,
+			gap=2 * opts.scale_factor,
+			fixed_centers=fixed_centers)
+		# convert label centers to text anchors (left end of the baseline of the last line)
+		anchors = [(center[0] - width / 2, center[1] + (above - below) / 2) for center, (width, above, below) in zip(centers, extents)]
+		return [lambda pos, r, bead_name, anchor=anchor: anchor for anchor in anchors]
 
 	def _itp_cg_interactions(self, interaction_type, hidden=()):
 		'''
