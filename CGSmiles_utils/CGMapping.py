@@ -122,7 +122,7 @@ class CGMapping:
 			if data["fragname"][-1].isupper() and len(data["fragname"]) > 1: # remove trailing letters from fragname except for virtual sites
 				data["fragname"] = data["fragname"][:-1]
 			data["atype"] = data["fragname"]
-			data["atomname"] = data["n"]
+			data["atomname"] = data.get("n", data["fragname"])
 
 	def _build_mol(self, opts):
 		mol, idx_map = cgsmiles_to_rdkit(self.aa_graph, add_hydrogens=opts.show_hydrogens)
