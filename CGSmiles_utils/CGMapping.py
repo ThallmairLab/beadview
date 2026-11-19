@@ -21,7 +21,7 @@ from PIL import Image
 import cairosvg
 
 from .utils import cgsmiles_to_rdkit
-from .drawing_utils import _bead_radius, _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_label, _bead_label_extent, _label_above_bead, _optimize_label_positions, _create_bond_line, _create_polyline, _offset_path, _offset_side, _strip_background
+from .drawing_utils import _bead_radius, _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, _vs_atom_weights, _get_vs_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_label, _bead_label_extent, _label_above_bead, _optimize_label_positions, _create_bond_line, _create_polyline, _offset_path, _offset_side, _strip_background
 from .itp_utils import itp_writer, add_comments_itp
 warnings.filterwarnings("ignore", category=UserWarning, module='MDAnalysis')  # ignore warnings from MDAnalysis about missing box dimensions
 
@@ -165,9 +165,11 @@ class CGMapping:
 			bead_positions[bead] = pos
 			add_bead(bead, pos, bead_type, data.get('n'))
 
-		for vnode, connections in virtual_edges.items():
+		for vnode in virtual_edges:
 			data = self.cg_graph.nodes[vnode]
-			pos = np.mean([bead_positions[b] for b in connections], axis=0)
+			atom_weights = _vs_atom_weights(self.cg_graph, vnode, virtual_edges)
+			pos = _get_vs_coordinate(atom_weights, lambda atom: drawer_coords.GetDrawCoords(idx_map[atom]),
+									 self.aa_graph, vnode, include_hydrogens=opts.hydrogens_in_bead_position)
 			bead_positions[vnode] = pos
 			if opts.show_vs:
 				add_bead(vnode, pos, data['fragname'], data.get('n'))
@@ -453,7 +455,7 @@ class CGMapping:
 		"""
 		Generate and save a coarse-grained structure file from a CGSmiles string.
 		Bead positions are the centers of the atoms they map to; virtual sites are placed
-		at the center of the beads they are connected to. The matching all-atom structure
+		at the weighted center of the atoms of the beads they are connected to (weights from wVS, else w). The matching all-atom structure
 		is written next to it (``_cg`` in the file name replaced by ``_aa``, or ``_aa`` appended).
 		"""
 		path, resname = self._prepare_output(out_file, resname)
@@ -474,8 +476,10 @@ class CGMapping:
 			if len(fragment) == 0:
 				raise ValueError(f"Bead {data.get('n', node)} has no atoms and is not a virtual site.")
 			positions[node] = np.mean([aa_positions[idx_map[atom]] for atom in fragment], axis=0)
-		for node, connections in virtual_nodes.items():
-			positions[node] = np.mean([positions[c] for c in connections], axis=0)
+		for node in virtual_nodes: # weighted by the wVS annotations of the atoms of the parent beads
+			atom_weights = _vs_atom_weights(self.cg_graph, node, virtual_nodes)
+			positions[node] = _get_vs_coordinate(atom_weights, lambda atom: aa_positions[idx_map[atom]],
+												 self.aa_graph, node)
 
 		# order beads by their 'index' property, then by the number in their name, fall back to the node id
 		def bead_index(node):

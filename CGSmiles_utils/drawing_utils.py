@@ -584,6 +584,71 @@ def _get_bead_coordinate(atoms, idx_map, drawer_coords, opts, bead):
 	bead_position = np.average(coords, axis=0, weights=weights)
 	return bead_position
 
+def _parse_wvs(bead_graph, atom):
+	'''
+	Return the ``wVS`` annotation of an atom as float, or None if it has none.
+	'''
+	value = bead_graph.nodes[atom].get('wVS')
+	if value is None:
+		return None
+	try:
+		return float(value)
+	except (TypeError, ValueError):
+		raise ValueError(f"wVS='{value}' of atom {bead_graph.nodes[atom].get('element')} "
+						 "is not a number.") from None
+
+def _vs_weight(bead_graph, atom):
+	'''
+	Weight of an atom of a parent bead when it is used for a virtual site (mirrors fast_forward).
+	The atom's own wVS if given; for a hydrogen without one, the wVS of the heavy atom
+	it is bonded to; otherwise the atom's normal mapping weight (w, default 1).
+	'''
+	wvs = _parse_wvs(bead_graph, atom)
+	if wvs is None and bead_graph.nodes[atom].get('element') == 'H':
+		for anchor in bead_graph.neighbors(atom):
+			if bead_graph.nodes[anchor].get('element') != 'H':
+				wvs = _parse_wvs(bead_graph, anchor)
+				break
+	if wvs is None:
+		return bead_graph.nodes[atom].get('weight', 1.0)
+	return wvs
+
+def _vs_atom_weights(cg_graph, vnode, virtual_nodes):
+	'''
+	Atoms that determine the position of a virtual site and their weights.
+	The atoms are those of the neighboring beads that are not virtual sites. An atom
+	shared between several of these beads gets the sum of its weights.
+
+	Returns
+	dict
+		{atom node in the AA graph: weight}
+	'''
+	parents = [n for n in cg_graph.neighbors(vnode) if n not in virtual_nodes]
+	if not parents:
+		data = cg_graph.nodes[vnode]
+		raise ValueError(f"Virtual site {data.get('n', data.get('fragname'))} (bead {vnode}) "
+						 "is not bonded to any bead with atoms, so its position is undefined.")
+	weights = {}
+	for parent in parents:
+		bead_graph = cg_graph.nodes[parent]['graph']
+		for atom in bead_graph.nodes:
+			weights[atom] = weights.get(atom, 0.0) + _vs_weight(bead_graph, atom)
+	return weights
+
+def _get_vs_coordinate(atom_weights, coord_of, aa_graph, vnode, include_hydrogens=True):
+	'''
+	Weighted average of the atom coordinates given by coord_of(atom) for a virtual site.
+	'''
+	coords, weights = [], []
+	for atom, weight in atom_weights.items():
+		if not include_hydrogens and aa_graph.nodes[atom]['element'] == 'H':
+			continue
+		coords.append(coord_of(atom))
+		weights.append(weight)
+	if not weights or np.all(np.array(weights) == 0):
+		raise ValueError(f"All wVS weights are zero for virtual site {vnode}. Cannot compute its position.")
+	return np.average(coords, axis=0, weights=weights)
+
 def _strip_background(svg):
 	'''
 	Strip the background rectangle from the SVG to make it transparent.
