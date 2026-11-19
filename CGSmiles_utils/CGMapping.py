@@ -21,7 +21,7 @@ from PIL import Image
 import cairosvg
 
 from .utils import cgsmiles_to_rdkit
-from .drawing_utils import _bead_radius, _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, _vs_atom_weights, _get_vs_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_label, _bead_label_extent, _label_above_bead, _optimize_label_positions, _create_bond_line, _create_polyline, _offset_path, _offset_side, _strip_background
+from .drawing_utils import _bead_radius, _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, _vs_atom_weights, _get_vs_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_outline, _create_bead_label, _bead_label_extent, _label_above_bead, _optimize_label_positions, _create_bond_line, _create_polyline, _offset_path, _offset_side, _strip_background
 from .itp_utils import itp_writer, add_comments_itp
 warnings.filterwarnings("ignore", category=UserWarning, module='MDAnalysis')  # ignore warnings from MDAnalysis about missing box dimensions
 
@@ -53,14 +53,20 @@ class DrawOptions:
 	color_atoms: bool = False
 	show_atom_indices: bool = False
 	bond_width: float = 1.5
+
 	# geometry
 	canvas_size: tuple = (300, 300)
 	scale_factor: float = 1
 	rotate_by: float = 0
 	flip: bool = False
 	remove_background: bool = True
+
 	# mapping
 	show_mapping: bool = True
+	style: str = 'beads' # 'beads': circles at the bead positions, 'outline': rounded outlines along the bonds of the atoms of each bead
+	outline_width: float = 12.0 # width of the bead outlines for style='outline'
+	outline_border_width: float = 1.5 # width of the border around the bead outlines for style='outline'
+	outline_border_color: str = '#000000' # color of the border around the bead outlines for style='outline'
 	show_bead_labels: bool = False
 	show_vs: bool = True
 	indicate_vs: bool = True # dashed outline for beads that are virtual sites in the ITP loaded with read_itp()
@@ -86,6 +92,8 @@ class DrawOptions:
 	check_orientation: bool = False
 
 	def __post_init__(self):
+		if self.style not in ('beads', 'outline'):
+			raise ValueError(f"style must be 'beads' or 'outline', got '{self.style}'")
 		if self.show_bead_labels and not self.show_mapping:
 			warnings.warn("show_bead_labels has no effect when show_mapping=False")
 		for option in ('show_bonds', 'show_angles', 'show_dihedrals'):
@@ -152,7 +160,16 @@ class CGMapping:
 		labeled_dummies = [] # indices into labeled of the dummy beads
 		itp_vs = self._itp_virtual_sites() if opts.indicate_vs and self.ff is not None else set()
 		def add_bead(bead, position, bead_type, bead_name):
-			beads.append(_create_bead_circle(position, bead_type, bead_name, opts.scale_factor, dashed=bead in itp_vs))
+			# outline the drawn atoms of the bead; beads without drawn atoms (e.g. virtual sites) are drawn as circles
+			atoms = [atom for atom in self.cg_graph.nodes[bead]['graph'].nodes if atom in idx_map] if opts.style == 'outline' else []
+			if atoms:
+				atom_positions = {atom: list(drawer_coords.GetDrawCoords(idx_map[atom])) for atom in atoms}
+				bonds = [(i, j) for i, j in self.aa_graph.subgraph(atoms).edges]
+				beads.append(_create_bead_outline(atom_positions, bonds, bead_type, bead_name,
+					opts.outline_width * opts.scale_factor, opts.outline_border_width * opts.scale_factor,
+					opts.outline_border_color))
+			else:
+				beads.append(_create_bead_circle(position, bead_type, bead_name, opts.scale_factor, dashed=bead in itp_vs))
 			if bead_type.startswith('U'):
 				labeled_dummies.append(len(labeled))
 			labeled.append((position, bead_type, bead_name))

@@ -166,6 +166,47 @@ def _create_bead_circle(bead_position, bead_type, bead_name, scale_factor, dashe
 	circle_svg += f'\tr="{_bead_radius(bead_type)*scale_factor}" />\n'
 	return ''.join(circle_svg)
 
+def _create_bead_outline(atom_positions, bonds, bead_type, bead_name, width, border_width, border_color='#000000'):
+	'''
+	Create SVG element for a bead drawn as a rounded outline along the bonds between its atoms.
+	Atoms that are not bonded to another atom of the bead are drawn as dots.
+
+	Parameters
+	----------
+	atom_positions : dict
+		Drawing coordinates (x, y) of the atoms of the bead, keyed by atom.
+	bonds : list of tuple
+		Pairs of atoms (keys of atom_positions) that are bonded.
+	bead_type : str
+		The type of the bead, determines the color.
+	bead_name : str
+		The name of the bead.
+	width : float
+		Width of the outline (without border).
+	border_width : float
+		Width of the border around the outline.
+	border_color : str
+		Color of the border around the outline.
+
+	Returns
+	-------
+	str
+		The SVG group element as a string.
+	'''
+	bead_name = bead_name if bead_name is not None else bead_type
+	bonded = {atom for bond in bonds for atom in bond}
+	dots = [atom_positions[atom] for atom in atom_positions if atom not in bonded]
+	d = ' '.join(f'M {atom_positions[i][0]},{atom_positions[i][1]} L {atom_positions[j][0]},{atom_positions[j][1]}' for i, j in bonds)
+	# all layers are opaque and the group is transparent, so overlapping segments do not add up
+	svg = [f'<g id="outline_bead_{bead_name}" style="opacity:0.5">\n']
+	for color, layer_width in ((border_color, width + 2 * border_width), (_bead_color(bead_type), width)):
+		if d:
+			svg.append(f'\t<path style="fill:none;stroke:{color};stroke-width:{layer_width};stroke-linecap:round;stroke-linejoin:round" d="{d}" />\n')
+		for x, y in dots:
+			svg.append(f'\t<circle style="fill:{color};stroke:none" cx="{x}" cy="{y}" r="{layer_width / 2}" />\n')
+	svg.append('</g>\n')
+	return ''.join(svg)
+
 def _create_bond_line(start, end, color='#000000', width=2.0):
 	'''
 	Create SVG line element for a bond or constraint between two beads.
