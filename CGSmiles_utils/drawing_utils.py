@@ -136,10 +136,11 @@ def _bead_color(bead_type):
 			color = '#808080' # gray
 	return color
 
-def _create_bead_circle(bead_position, bead_type, bead_name, scale_factor, dashed=False):
+def _create_bead_circle(bead_position, bead_type, bead_name, scale_factor, dashed=False, border_width=1.75, border_color='#6e6e6e',
+						fill_alpha=0.5, border_alpha=0.5):
 	'''
-	Create SVG circle element for a bead.
-	
+	Create SVG element for a bead drawn as a circle.
+
 	Parameters
 	----------
 	bead_position : list or np.array
@@ -149,27 +150,60 @@ def _create_bead_circle(bead_position, bead_type, bead_name, scale_factor, dashe
 	bead_name : str
 		The name of the bead.
 	dashed : bool
-		Draw the outline dashed (used for virtual sites).
+		Draw the border dashed (used for virtual sites).
+	border_width : float
+		Width of the border at scale_factor=1.
+	border_color : str
+		Color of the border.
+	fill_alpha, border_alpha : float
+		Opacity of the filling and of the border.
 
 	Returns
 	-------
 	str
-		The SVG circle element as a string.
+		The SVG group element as a string.
 	'''
 	bead_name = bead_name if bead_name is not None else bead_type
 	dasharray = f'{2.5 * scale_factor},{1.75 * scale_factor}' if dashed else 'none'
-	circle_svg = ['<circle\n']
-	circle_svg += f'\tstyle="opacity:0.5;fill:{_bead_color(bead_type)};fill-opacity:1;stroke:#6e6e6e;stroke-width:{1.75 * scale_factor};stroke-miterlimit:4;stroke-dasharray:{dasharray}"\n'
-	circle_svg += f'\tid="circle_bead_{bead_name}"\n'
-	circle_svg += f'\tcx="{bead_position[0]}"\n'
-	circle_svg += f'\tcy="{bead_position[1]}"\n'
-	circle_svg += f'\tr="{_bead_radius(bead_type)*scale_factor}" />\n'
-	return ''.join(circle_svg)
+	x, y = bead_position[0], bead_position[1]
+	r = _bead_radius(bead_type) * scale_factor
+	border_width = border_width * scale_factor
+	# the filling ends where the border starts, so the two do not overlap
+	svg = [f'<g id="circle_bead_{bead_name}">\n']
+	svg.append(f'\t<circle style="fill:{_bead_color(bead_type)};fill-opacity:{fill_alpha};stroke:none" cx="{x}" cy="{y}" r="{max(r - border_width / 2, 0)}" />\n')
+	svg.append(f'\t<circle style="fill:none;stroke:{border_color};stroke-opacity:{border_alpha};stroke-width:{border_width};stroke-dasharray:{dasharray}" cx="{x}" cy="{y}" r="{r}" />\n')
+	svg.append('</g>\n')
+	return ''.join(svg)
 
-def _create_bead_outline(atom_positions, bonds, bead_type, bead_name, width, border_width, border_color='#000000'):
+def _distance_to_skeleton(x, y, segments, points):
+	'''
+	Distance of the grid points (x, y) to the nearest of the line segments and points.
+	'''
+	distance = np.full(x.shape, np.inf)
+	for (ax, ay), (bx, by) in segments:
+		dx, dy = bx - ax, by - ay
+		length2 = dx * dx + dy * dy
+		t = np.clip(((x - ax) * dx + (y - ay) * dy) / length2, 0, 1) if length2 > 0 else 0
+		distance = np.minimum(distance, np.hypot(x - ax - t * dx, y - ay - t * dy))
+	for px, py in points:
+		distance = np.minimum(distance, np.hypot(x - px, y - py))
+	return distance
+
+def _contour_path(x, y, distance, level):
+	'''
+	SVG path data of the closed contour lines where the distance equals level.
+	'''
+	from contourpy import contour_generator
+	lines = contour_generator(x, y, distance).lines(level)
+	return ' '.join('M ' + ' L '.join(f'{px:.2f},{py:.2f}' for px, py in line) + ' Z' for line in lines if len(line) > 2)
+
+def _create_bead_outline(atom_positions, bonds, bead_type, bead_name, width, border_width, border_color='#000000',
+						 fill_alpha=0.5, border_alpha=0.5):
 	'''
 	Create SVG element for a bead drawn as a rounded outline along the bonds between its atoms.
 	Atoms that are not bonded to another atom of the bead are drawn as dots.
+	The filling and the border are computed as shapes (the region closer than width/2 to the bonds and the ring
+	around it), so overlapping segments do not add up and the two do not overlap.
 
 	Parameters
 	----------
@@ -187,6 +221,8 @@ def _create_bead_outline(atom_positions, bonds, bead_type, bead_name, width, bor
 		Width of the border around the outline.
 	border_color : str
 		Color of the border around the outline.
+	fill_alpha, border_alpha : float
+		Opacity of the filling and of the border.
 
 	Returns
 	-------
@@ -195,15 +231,21 @@ def _create_bead_outline(atom_positions, bonds, bead_type, bead_name, width, bor
 	'''
 	bead_name = bead_name if bead_name is not None else bead_type
 	bonded = {atom for bond in bonds for atom in bond}
-	dots = [atom_positions[atom] for atom in atom_positions if atom not in bonded]
-	d = ' '.join(f'M {atom_positions[i][0]},{atom_positions[i][1]} L {atom_positions[j][0]},{atom_positions[j][1]}' for i, j in bonds)
-	# all layers are opaque and the group is transparent, so overlapping segments do not add up
-	svg = [f'<g id="outline_bead_{bead_name}" style="opacity:0.5">\n']
-	for color, layer_width in ((border_color, width + 2 * border_width), (_bead_color(bead_type), width)):
-		if d:
-			svg.append(f'\t<path style="fill:none;stroke:{color};stroke-width:{layer_width};stroke-linecap:round;stroke-linejoin:round" d="{d}" />\n')
-		for x, y in dots:
-			svg.append(f'\t<circle style="fill:{color};stroke:none" cx="{x}" cy="{y}" r="{layer_width / 2}" />\n')
+	segments = [(atom_positions[i], atom_positions[j]) for i, j in bonds]
+	points = [atom_positions[atom] for atom in atom_positions if atom not in bonded]
+	inner, outer = width / 2, width / 2 + border_width
+	# distance field on a grid that is fine compared to the border and extends beyond the outline
+	step = max(min(border_width, width) / 4, 0.05) if border_width > 0 else max(width / 40, 0.05)
+	coords = np.array(list(atom_positions.values()), dtype=float).reshape(-1, 2)
+	low, high = coords.min(axis=0) - outer - 2 * step, coords.max(axis=0) + outer + 2 * step
+	x, y = np.meshgrid(np.arange(low[0], high[0] + step, step), np.arange(low[1], high[1] + step, step))
+	distance = _distance_to_skeleton(x, y, segments, points)
+	inner_path = _contour_path(x, y, distance, inner)
+	svg = [f'<g id="outline_bead_{bead_name}">\n']
+	svg.append(f'\t<path style="fill:{_bead_color(bead_type)};fill-opacity:{fill_alpha};fill-rule:evenodd;stroke:none" d="{inner_path}" />\n')
+	if border_width > 0:
+		ring_path = _contour_path(x, y, distance, outer) + ' ' + inner_path
+		svg.append(f'\t<path style="fill:{border_color};fill-opacity:{border_alpha};fill-rule:evenodd;stroke:none" d="{ring_path}" />\n')
 	svg.append('</g>\n')
 	return ''.join(svg)
 

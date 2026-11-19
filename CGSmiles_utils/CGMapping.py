@@ -48,52 +48,65 @@ class suppress_output:
 
 @dataclass
 class DrawOptions:
-	# molecule
+	"""
+	Options for drawing a CGMapping. Lengths are in pixels at scale_factor=1 and are multiplied by scale_factor.
+	"""
+	# canvas
+	canvas_size: tuple = (300, 300)
+	scale_factor: float = 1
+	rotate_by: float = 0 # rotation of the molecule in degrees
+	flip: bool = False # mirror the molecule horizontally
+	remove_background: bool = True # transparent instead of white background
+
+	# atomistic molecule
 	show_hydrogens: bool = False
-	color_atoms: bool = False
+	color_atoms: bool = False # color heteroatoms by element instead of black and white
 	show_atom_indices: bool = False
 	bond_width: float = 1.5
 
-	# geometry
-	canvas_size: tuple = (300, 300)
-	scale_factor: float = 1
-	rotate_by: float = 0
-	flip: bool = False
-	remove_background: bool = True
-
-	# mapping
-	show_mapping: bool = True
+	# beads
+	show_mapping: bool = True # draw the beads; all following options need it
 	style: str = 'beads' # 'beads': circles at the bead positions, 'outline': rounded outlines along the bonds of the atoms of each bead
-	outline_width: float = 12.0 # width of the bead outlines for style='outline'
-	outline_border_width: float = 1.5 # width of the border around the bead outlines for style='outline'
-	outline_border_color: str = '#000000' # color of the border around the bead outlines for style='outline'
-	show_bead_labels: bool = False
-	show_vs: bool = True
-	indicate_vs: bool = True # dashed outline for beads that are virtual sites in the ITP loaded with read_itp()
-	show_node_indicators: bool = False
-	show_bonds: bool = False # draw bonds and constraints from the ITP loaded with read_itp()
-	bond_color: str = '#000000'
-	constraint_color: str = "#020070FF"
-	show_angles: bool = False # draw angles from the ITP as bent lines offset from the beads
-	angle_color: str = "#286E8D"
-	angle_offset: float = 8.0 # distance between an angle line and the bonds it follows, positive = away from the centroid of all beads
-	show_dihedrals: bool = False # draw dihedrals from the ITP as lines through the four beads
-	dihedral_color: str = '#286E8D'
-	dihedral_offset: float = 8.0 # distance between a dihedral line and the bonds it follows, positive = away from the centroid of all beads
-	cg_line_width: float = 2.0 # line width for bonds, constraints, angles and dihedrals
-	line_spacing: float = 4.0 # distance between angle/dihedral lines that would otherwise overlap
+	outline_width: float = 12.0 # style='outline' only
+	border_width: float = 1.5 # border of the bead circles or outlines
+	border_color: str = '#000000'
+	border_alpha: float = 0.5 # opacity of the bead borders
+	fill_alpha: float = 0.5 # opacity of the bead filling
 	include_hydrogens_in_bead_position: bool | None = None # None follows show_hydrogens
-	bead_type_label_color : str = '#666666'
-	bead_name_label_color : str = '#000000'
-	bead_label_position: Callable = lambda pos, r, bead_name: (pos[0] + r * 1 / np.sqrt(2), pos[1] - r * 1 / np.sqrt(2)) # function to determine the position of the bead label relative to the bead position
-	optimize_bead_labels: bool = False # place bead labels around their beads to minimize overlap with other labels, beads, the molecule and the drawn bonds/angles/dihedrals; overrides bead_label_position
-	# labels of dummy beads (type U) are always placed right above the bead
+	show_vs: bool = True # draw virtual sites
+	indicate_vs: bool = True # dashed outline for beads that are virtual sites in the ITP loaded with read_itp()
+
+	# bead labels (labels of dummy beads, type U, are always placed right above the bead)
+	show_bead_labels: bool = False
+	bead_type_label_color: str = '#666666'
+	bead_name_label_color: str = '#000000'
+	# function (bead_position, bead_radius, bead_name) -> label position, or 'optimize' to place the labels around
+	# their beads with minimal overlap with other labels, beads, the molecule and the drawn bonds/angles/dihedrals
+	bead_label_position: Callable | str = 'optimize'
+
+	# interactions from the ITP loaded with read_itp()
+	show_bonds: bool = False # bonds and constraints as straight lines between the beads
+	show_angles: bool = False # angles as bent lines along the bonds
+	show_dihedrals: bool = False # dihedrals as lines along the bonds of the four beads
+	bond_color: str = '#000000'
+	constraint_color: str = '#020070FF'
+	angle_color: str = '#286E8D'
+	dihedral_color: str = '#286E8D'
+	cg_line_width: float = 2.0 # width of the bond, constraint, angle and dihedral lines
+	cg_line_offset: float = 8.0 # distance between angle/dihedral lines and the bonds they follow, positive = away from the centroid of all beads
+	line_spacing: float = 4.0 # distance between angle/dihedral lines that would otherwise overlap
+
 	# debugging
-	check_orientation: bool = False
+	check_orientation: bool = False # report (and highlight in red) the most vertical bond of the molecule
 
 	def __post_init__(self):
 		if self.style not in ('beads', 'outline'):
 			raise ValueError(f"style must be 'beads' or 'outline', got '{self.style}'")
+		for option in ('fill_alpha', 'border_alpha'):
+			if not 0 <= getattr(self, option) <= 1:
+				raise ValueError(f"{option} must be between 0 and 1, got {getattr(self, option)}")
+		if isinstance(self.bead_label_position, str) and self.bead_label_position != 'optimize':
+			raise ValueError(f"bead_label_position must be a function or 'optimize', got '{self.bead_label_position}'")
 		if self.show_bead_labels and not self.show_mapping:
 			warnings.warn("show_bead_labels has no effect when show_mapping=False")
 		for option in ('show_bonds', 'show_angles', 'show_dihedrals'):
@@ -166,10 +179,12 @@ class CGMapping:
 				atom_positions = {atom: list(drawer_coords.GetDrawCoords(idx_map[atom])) for atom in atoms}
 				bonds = [(i, j) for i, j in self.aa_graph.subgraph(atoms).edges]
 				beads.append(_create_bead_outline(atom_positions, bonds, bead_type, bead_name,
-					opts.outline_width * opts.scale_factor, opts.outline_border_width * opts.scale_factor,
-					opts.outline_border_color))
+					opts.outline_width * opts.scale_factor, opts.border_width * opts.scale_factor,
+					opts.border_color, fill_alpha=opts.fill_alpha, border_alpha=opts.border_alpha))
 			else:
-				beads.append(_create_bead_circle(position, bead_type, bead_name, opts.scale_factor, dashed=bead in itp_vs))
+				beads.append(_create_bead_circle(position, bead_type, bead_name, opts.scale_factor, dashed=bead in itp_vs,
+					border_width=opts.border_width, border_color=opts.border_color,
+					fill_alpha=opts.fill_alpha, border_alpha=opts.border_alpha))
 			if bead_type.startswith('U'):
 				labeled_dummies.append(len(labeled))
 			labeled.append((position, bead_type, bead_name))
@@ -201,11 +216,12 @@ class CGMapping:
 
 		labels = []
 		if opts.show_bead_labels:
-			label_positions = [opts.bead_label_position] * len(labeled)
+			optimize = opts.bead_label_position == 'optimize'
+			label_positions = [None if optimize else opts.bead_label_position] * len(labeled)
 			for i in labeled_dummies:
 				_, bead_type, bead_name = labeled[i]
 				label_positions[i] = _label_above_bead(bead_type, bead_name, opts.scale_factor)
-			if opts.optimize_bead_labels:
+			if optimize:
 				label_positions = self._optimize_bead_labels(mol, drawer_coords, labeled, bead_positions, opts, hidden, fixed=labeled_dummies)
 			for (position, bead_type, bead_name), label_position in zip(labeled, label_positions):
 				labels.append(_create_bead_label(
@@ -255,8 +271,8 @@ class CGMapping:
 		if self.ff is not None:
 			for option, interaction_types, width in (
 					('show_bonds', ('bonds', 'constraints'), cg_width / 2),
-					('show_angles', ('angles',), opts.angle_offset * opts.scale_factor + cg_width),
-					('show_dihedrals', ('dihedrals',), opts.dihedral_offset * opts.scale_factor + cg_width)):
+					('show_angles', ('angles',), opts.cg_line_offset * opts.scale_factor + cg_width),
+					('show_dihedrals', ('dihedrals',), opts.cg_line_offset * opts.scale_factor + cg_width)):
 				if not getattr(opts, option):
 					continue
 				for interaction_type in interaction_types:
@@ -329,7 +345,7 @@ class CGMapping:
 		'''
 		Create SVG polylines for the angles and dihedrals (including impropers) of the loaded ITP, depending on
 		opts.show_angles and opts.show_dihedrals. Each one is drawn as a line along its bonds, shifted by
-		opts.angle_offset or opts.dihedral_offset away from the centroid of all beads. Where lines would overlap
+		opts.cg_line_offset away from the centroid of all beads. Where lines would overlap
 		on a bond, the offset of the later line is increased in steps of opts.line_spacing; angles are placed first.
 
 		Parameters
@@ -363,10 +379,10 @@ class CGMapping:
 
 		angles, dihedrals = [], []
 		if opts.show_angles:
-			angles = [place(nodes, opts.angle_offset * opts.scale_factor, opts.angle_color)
+			angles = [place(nodes, opts.cg_line_offset * opts.scale_factor, opts.angle_color)
 					  for nodes in self._itp_cg_interactions('angles', hidden)]
 		if opts.show_dihedrals:
-			dihedrals = [place(nodes, opts.dihedral_offset * opts.scale_factor, opts.dihedral_color)
+			dihedrals = [place(nodes, opts.cg_line_offset * opts.scale_factor, opts.dihedral_color)
 						 for nodes in self._itp_cg_interactions('dihedrals', hidden)]
 		return angles, dihedrals
 
