@@ -592,66 +592,38 @@ def detect_virtual_nodes(resgraph):
 			virtual_edges[node] = sorted([v if u == node else u for u, v, _ in edges])
 	return virtual_edges
 
-def _check_vertical_lines(svg, highlight=True, threshold=0.5, tolerance=0.02):
+def _most_vertical_bonds(mol, tolerance=0.02):
 	'''
-	Check for vertical lines in the SVG and highlight them in red if requested.
-	Vertical lines are defined as lines with an angle of less than `threshold` degrees to the y-axis.
-	A tolerance can be set to account for small deviations from perfect verticality.
+	Find the bonds of a molecule that are closest to vertical in the drawing.
 
 	Parameters
 	----------
-	svg : str
-		The SVG string to check.
-	highlight : bool, optional, default: True
-		Whether to highlight vertical lines in red.
-	threshold : float, optional, default: 0.5
-		The angle threshold in degrees to consider a line as vertical.
+	mol : rdkit.Chem.rdchem.Mol
+		Molecule with a 2D conformer.
 	tolerance : float, optional, default: 0.02
-		The tolerance in degrees to account for small deviations from perfect verticality.
-	
+		Bonds whose angle to the vertical differs by less than this (in degrees) from the
+		smallest angle are all returned.
+
 	Returns
 	-------
-	str or None
+	angle : float
+		Signed angle in degrees between the most vertical bond and the y-axis of the drawing
+		(90 if the molecule has no bonds).
+	bonds : list of int
+		Indices of the bonds within tolerance of the most vertical one.
 	'''
-	min = 180
-	min_index = []
-	sign = '+'
-	for i, line in enumerate(svg.split('\n')):
-		if line.strip().startswith('<path') and 'd=' in line and line.strip().endswith('/>'):
-			# get the part after d=" and before the next "
-			d_part = line.split("d='")[1].split("'")[0]
-			tokens = d_part.replace(",", " ").split()
-			if len(tokens) > 6:
-				continue
-			x1 = float(tokens[1])
-			y1 = float(tokens[2])
-			x2 = float(tokens[4])
-			y2 = float(tokens[5])
-
-			# calculate the angle between the y-axis and the line
-			if y1-y2 != 0:
-				angle = np.arctan((x1-x2)/(y1-y2)) * 180 / np.pi
-				# print(f"angle: {angle:.2f} degrees")
-			if abs(angle) <= min+tolerance:
-				min = abs(angle)
-				if abs(min - abs(angle))<tolerance:
-					min_index.append(i)
-					if angle < 0:
-						sign = '-'
-					else:
-						sign = '+'
-				else:
-					min_index = [i]
-	if min < threshold:
-		print(f"Found vertical lines with angle {sign}{min:.2f} degrees")
-	else:
-		print(f"No vertical lines found, min angle: {sign}{min:.2f} degrees")
-	if highlight:
-		lines = svg.split('\n')
-		for i in min_index:
-			lines[i] = lines[i].replace('stroke:#000000', 'stroke:#FF0000')
-		svg = '\n'.join(lines)
-	return svg
+	conf = mol.GetConformer()
+	angles = []
+	for bond in mol.GetBonds():
+		p = conf.GetAtomPosition(bond.GetBeginAtomIdx())
+		q = conf.GetAtomPosition(bond.GetEndAtomIdx())
+		dx, dy = p.x - q.x, q.y - p.y # the y-axis of the drawing points down
+		angle = np.degrees(np.arctan(dx / dy)) if dy != 0 else 90.0
+		angles.append((angle, bond.GetIdx()))
+	if not angles:
+		return 90.0, []
+	angle = min((a for a, _ in angles), key=abs)
+	return angle, [idx for a, idx in angles if abs(a) - abs(angle) < tolerance]
 
 def _get_bead_coordinate(atoms, idx_map, drawer_coords, opts, bead):
 	coords = []
@@ -661,8 +633,11 @@ def _get_bead_coordinate(atoms, idx_map, drawer_coords, opts, bead):
 			continue
 		atom = idx_map[atom]
 		coords.append(drawer_coords.GetDrawCoords(atom))
-		weights.append(data['weight'])
-	if np.all(np.array(weights) == 0): 
+		weights.append(data.get('weight', 1.0))
+	if not weights:
+		raise ValueError(f"Bead {bead} has no atoms to compute its position from "
+						 "(a bead of only hydrogens needs include_hydrogens_in_bead_position=True).")
+	if np.all(np.array(weights) == 0):
 		raise ValueError(f"All weights are zero for bead {bead}. Cannot compute bead position.")
 	bead_position = np.average(coords, axis=0, weights=weights)
 	return bead_position

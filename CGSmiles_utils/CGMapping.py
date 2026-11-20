@@ -3,7 +3,7 @@ from cgsmiles.drawing import draw_molecule
 from fast_forward.itp_parser_sub import read_itp
 import pysmiles
 
-import warnings, io, re, string, os, logging
+import warnings, io, re, string, os, logging, copy
 from pathlib import Path
 from collections.abc import Callable
 from dataclasses import dataclass, replace
@@ -21,11 +21,43 @@ from PIL import Image
 import cairosvg
 
 from .utils import cgsmiles_to_rdkit
-from .drawing_utils import _bead_radius, _flip_molecule, _rotate_molecule_around_center, _check_vertical_lines, _get_bead_coordinate, _vs_atom_weights, _get_vs_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_outline, _create_bead_label, _bead_label_extent, _label_above_bead, _optimize_label_positions, _create_bond_line, _create_polyline, _offset_path, _offset_side, _strip_background
+from .drawing_utils import _bead_radius, _flip_molecule, _rotate_molecule_around_center, _most_vertical_bonds, _get_bead_coordinate, _vs_atom_weights, _get_vs_coordinate, detect_virtual_nodes, _create_bead_circle, _create_bead_outline, _create_bead_label, _bead_label_extent, _label_above_bead, _optimize_label_positions, _create_bond_line, _create_polyline, _offset_path, _offset_side, _strip_background
 from .itp_utils import itp_writer, add_comments_itp
-warnings.filterwarnings("ignore", category=UserWarning, module='MDAnalysis')  # ignore warnings from MDAnalysis about missing box dimensions
 
 REFERENCE_SCALE = 25
+BOX_SIZE = 100.0 # Angstrom, box written to the generated structure files
+MARTINI_MASSES = {'T': 36.0, 'S': 54.0, 'R': 72.0} # default Martini 3 masses per bead size
+
+def _fragname_to_type(fragname):
+	'''
+	Bead type of a fragment name: a trailing uppercase letter (used to make fragment names unique,
+	e.g. TC5A) is removed, except for single letter names like U.
+	'''
+	if len(fragname) > 1 and fragname[-1].isupper():
+		return fragname[:-1]
+	return fragname
+
+def _bead_size(bead_type):
+	'''Size letter (T, S or R) of a Martini bead type, None for dummy beads.'''
+	if bead_type.startswith('U'):
+		return None
+	return bead_type[0] if bead_type[0] in ('T', 'S') else 'R'
+
+def _split_top_level(text, sep=','):
+	'''Split text at sep, ignoring separators inside brackets.'''
+	parts, depth, start = [], 0, 0
+	for i, char in enumerate(text):
+		if char in '[({':
+			depth += 1
+		elif char in '])}':
+			depth -= 1
+		elif char == sep and depth == 0:
+			parts.append(text[start:i])
+			start = i + 1
+	parts.append(text[start:])
+	return parts
+
+_BEAD_PATTERN = re.compile(r'\[#([^\];]+)([^\]]*)\]') # [#fragname;annotations]
 
 class suppress_output:
     def __enter__(self):
@@ -140,8 +172,7 @@ class CGMapping:
 	# general utility methods
 	def _clean_cg_graph(self):
 		for n, data in self.cg_graph.nodes(data=True):
-			if data["fragname"][-1].isupper() and len(data["fragname"]) > 1: # remove trailing letters from fragname except for virtual sites
-				data["fragname"] = data["fragname"][:-1]
+			data["fragname"] = _fragname_to_type(data["fragname"])
 			data["atype"] = data["fragname"]
 			data["atomname"] = data.get("n", data["fragname"])
 
@@ -157,8 +188,9 @@ class CGMapping:
 	@staticmethod
 	def _make_drawer(opts):
 		drawer = rdMolDraw2D.MolDraw2DSVG(*opts.canvas_size)
-		drawer.SetScale(opts.scale_factor*REFERENCE_SCALE, opts.scale_factor*REFERENCE_SCALE,
-						Point2D(1000, 1000), Point2D(-1000, -1000))
+		# SetScale only takes integer sizes, so scale factors are effectively rounded to multiples of 1/REFERENCE_SCALE
+		size = max(int(round(opts.scale_factor * REFERENCE_SCALE)), 1)
+		drawer.SetScale(size, size, Point2D(1000, 1000), Point2D(-1000, -1000))
 		return drawer
 
 	def _draw_beads(self, mol, svg, idx_map, opts):
@@ -397,13 +429,21 @@ class CGMapping:
 		o.bondLineWidth = opts.bond_width * opts.scale_factor
 		if not opts.color_atoms:
 			o.useBWAtomPalette()
-		drawer.DrawMolecule(mol)
+		if opts.check_orientation:
+			angle, vertical_bonds = _most_vertical_bonds(mol, tolerance=0.02)
+			if abs(angle) < 0.5:
+				print(f"Found vertical lines with angle {angle:+.2f} degrees")
+			else:
+				print(f"No vertical lines found, min angle: {angle:+.2f} degrees")
+			o.continuousHighlight = False # draw the highlighted bonds in red instead of underlaying them
+			drawer.DrawMolecule(mol, highlightAtoms=[], highlightBonds=vertical_bonds,
+								highlightBondColors={bond: (1.0, 0.0, 0.0) for bond in vertical_bonds})
+		else:
+			drawer.DrawMolecule(mol)
 		drawer.FinishDrawing()
 		svg = drawer.GetDrawingText()
 		if opts.show_mapping:
 			svg = self._draw_beads(mol, svg, idx_map, opts)
-		if opts.check_orientation:
-			svg = _check_vertical_lines(svg, highlight=True, threshold=0.5, tolerance=0.02)
 		if opts.remove_background:
 			svg = _strip_background(svg)
 		return svg
@@ -448,54 +488,73 @@ class CGMapping:
 		Add a .pdb extension if none is given, check that MDAnalysis can write the format
 		and derive the residue name from the file name if none is given.
 		"""
+		from MDAnalysis.coordinates.core import get_writer_for
 		path = Path(out_file)
 		if not path.suffix:
 			path = path.with_suffix('.pdb')
-		file_type = path.suffix[1:]
-		supported = list(mda._SINGLEFRAME_WRITERS.keys())
-		if file_type.casefold() not in [fmt.casefold() for fmt in supported]:
-			raise ValueError(f"Unsupported file type: {file_type}. Supported types are: {supported}")
+		try:
+			get_writer_for(str(path), multiframe=False)
+		except TypeError:
+			raise ValueError(f"Unsupported file type: {path.suffix[1:]}. Use a single frame format "
+							 "MDAnalysis can write, e.g. pdb or gro.") from None
 		resname = path.stem[:5] if resname is None else resname[:5]
 		return path, resname
 
-	def _embed_aa(self):
+	def _embed_aa(self, random_seed=42):
 		"""
 		Generate 3D coordinates for the all-atom molecule and optimize the geometry.
 		Returns the RDKit molecule and the mapping from aa_graph nodes to RDKit atom indices.
+		random_seed makes the conformer reproducible; None gives a different one on every call.
 		"""
 		mol, idx_map = cgsmiles_to_rdkit(self.aa_graph, add_hydrogens=True)
 		SanitizeMol(mol)
-		AllChem.EmbedMolecule(mol, AllChem.ETKDG())
-		AllChem.UFFOptimizeMolecule(mol)
+		params = AllChem.ETKDG()
+		params.randomSeed = -1 if random_seed is None else random_seed
+		if AllChem.EmbedMolecule(mol, params) == -1:
+			params.useRandomCoords = True # more robust for large or strained molecules
+			if AllChem.EmbedMolecule(mol, params) == -1:
+				raise RuntimeError("RDKit could not generate 3D coordinates for the molecule.")
+		if AllChem.UFFOptimizeMolecule(mol, maxIters=2000) != 0:
+			warnings.warn("The UFF geometry optimization of the all-atom structure did not converge.")
 		return mol, idx_map
 
 	@staticmethod
-	def _write_aa(mol, path, resname):
-		u = mda.Universe(mol)
-		u.add_TopologyAttr('resnames', [resname])
-		u.dimensions = [100, 100, 100, 90, 90, 90]  # set box dimensions to avoid warnings
-		u.atoms.write(str(path))
+	def _write_universe(u, path):
+		u.dimensions = [BOX_SIZE, BOX_SIZE, BOX_SIZE, 90, 90, 90]
+		with warnings.catch_warnings():
+			warnings.filterwarnings("ignore", category=UserWarning, module='MDAnalysis') # e.g. missing elements or occupancies
+			u.atoms.write(str(path))
 
-	def aa_structure(self, out_file="molecule_aa.pdb", resname=None):
+	@classmethod
+	def _write_aa(cls, mol, path, resname):
+		with warnings.catch_warnings():
+			warnings.filterwarnings("ignore", category=UserWarning, module='MDAnalysis')
+			u = mda.Universe(mol)
+		u.add_TopologyAttr('resnames', [resname])
+		cls._write_universe(u, path)
+
+	def aa_structure(self, out_file="molecule_aa.pdb", resname=None, random_seed=42):
 		"""
 		Generate and save an all-atom structure file from a CGSmiles string.
+		random_seed makes the conformer reproducible; None gives a different one on every call.
 		"""
 		path, resname = self._prepare_output(out_file, resname)
-		mol, _ = self._embed_aa()
+		mol, _ = self._embed_aa(random_seed)
 		self._write_aa(mol, path, resname)
 
-	def cg_structure(self, out_file="molecule_cg.pdb", resname=None, write_aa=True):
+	def cg_structure(self, out_file="molecule_cg.pdb", resname=None, write_aa=True, random_seed=42):
 		"""
 		Generate and save a coarse-grained structure file from a CGSmiles string.
 		Bead positions are the centers of the atoms they map to; virtual sites are placed
 		at the weighted center of the atoms of the beads they are connected to (weights from wVS, else w). The matching all-atom structure
 		is written next to it (``_cg`` in the file name replaced by ``_aa``, or ``_aa`` appended).
+		random_seed makes the conformer reproducible; None gives a different one on every call.
 		"""
 		path, resname = self._prepare_output(out_file, resname)
 		# get the suffix of the output file to determine the format (e.g., .pdb, .gro)
 		suffix = path.suffix[1:]  # remove the dot
 		aa_stem = path.stem.replace('_cg', '_aa') if '_cg' in path.stem else f'{path.stem}_aa'
-		mol, idx_map = self._embed_aa()
+		mol, idx_map = self._embed_aa(random_seed)
 		if write_aa:
 			self._write_aa(mol, path.with_name(f'{aa_stem}.{suffix}'), resname)
 		aa_positions = mol.GetConformer().GetPositions() # in Angstrom
@@ -524,62 +583,82 @@ class CGMapping:
 		nodes = sorted(self.cg_graph.nodes, key=bead_index)
 
 		u = mda.Universe.empty(len(nodes), n_residues=1, atom_resindex=np.zeros(len(nodes), dtype=int), trajectory=True)
-		u.add_TopologyAttr('names', [self.cg_graph.nodes[n]['n'] for n in nodes])
+		u.add_TopologyAttr('names', [self.cg_graph.nodes[n]['atomname'] for n in nodes])
 		u.add_TopologyAttr('resnames', [resname])
-		u.add_TopologyAttr('resids', [0])
+		u.add_TopologyAttr('resids', [1])
 		u.add_TopologyAttr('record_types', ['HETATM'] * len(nodes))
 		u.atoms.positions = np.array([positions[n] for n in nodes])
-		u.dimensions = np.array([10.0, 10.0, 10.0, 90.0, 90.0, 90.0]) # set box size to avoid warnings
-		u.atoms.write(str(path))
+		self._write_universe(u, path)
 
 	# ITP manipulation methods
 	def change_bead_types(self, bead_change):
 		"""
-		bead_change is a dictionary with the format {name: new_type}
+		Change the types of beads, selected by their name (n= annotation).
+
+		Each changed bead gets its own copy of its fragment, named after the new type. If that
+		name is already taken, an uppercase letter is appended (e.g. TC5Z), which is removed
+		again when the type is read. All other annotations of the beads are kept.
+
+		Parameters
+		----------
+		bead_change : dict
+			{bead name: new bead type}
+
+		Returns
+		-------
+		str
+			The new CGSmiles string, also stored in self.cgs_string.
 		"""
-		cg = self.cgs_string.split('}.{')[0][1:]
-		aa = self.cgs_string.split('}.{')[1][:-1]
+		resolutions = re.split(r'\}\s*\.\s*\{', self.cgs_string.strip())
+		if len(resolutions) != 2 or not resolutions[0].startswith('{') or not resolutions[1].endswith('}'):
+			raise ValueError("change_bead_types only supports CGSmiles strings with two resolutions, {cg}.{fragments}.")
+		cg, fragments = resolutions[0][1:], resolutions[1][:-1]
+		definitions = [part.strip() for part in _split_top_level(fragments)]
+		fragment_bodies = {} # fragment name -> definition without '#name'
+		for definition in definitions:
+			name, _, _ = definition.lstrip('#').partition('=')
+			fragment_bodies[name] = definition[len(name) + 1:]
 
-		# split the cg part into its components
-		cg = [part.split('[') for part in cg.split(']')]
-		cg = [item for sublist in cg for item in sublist if item]
-		indices = [i for i, part in enumerate(cg) if part.startswith('#')] # get the indices of the beads in the cg part
-		types = []
-		names = []
-		for i in indices:
-			tokens = cg[i].split(';')
-			for token in tokens:
-				if token.startswith('#'):
-					types.append(token[1:])
-				if token.startswith('n='):
-					names.append(token[2:])
-		types_initial = types.copy()
-		# check if names are unique
-		if len(names) != len(set(names)):
-			raise ValueError("Names in the CGSmiles string are not unique")
+		beads = {} # bead name -> match of the bead in the cg part
+		for match in _BEAD_PATTERN.finditer(cg):
+			name = re.search(r';n=([^;\]]+)', match.group(2))
+			if name is None:
+				continue
+			if name.group(1) in beads:
+				raise ValueError(f"Bead name {name.group(1)} is not unique in the CGSmiles string.")
+			beads[name.group(1)] = match
+		unknown = [name for name in bead_change if name not in beads]
+		if unknown:
+			raise ValueError(f"No bead named {', '.join(unknown)} in the CGSmiles string. Named beads: {', '.join(beads)}.")
 
-		non_unique_count = 0
-		letters = list(reversed(string.ascii_uppercase))
-		# change types according to the bead_change
-		new_aa_parts = []
-		for name, type_ in bead_change.items():
-			idx = names.index(name)
-			if type_ != types[idx]: # change type
-				new_type = f'{type_}{letters[non_unique_count]}' if type_ in types_initial else type_ # add letter if the type is already present in the cg part
-				for part in aa.split(','):
-					if part.startswith(f'#{types[idx]}'):
-						new_aa_parts.append(part.replace(f'#{types[idx]}', f'#{new_type}')) # copy the part with the new type 
-				types[idx] = new_type
-				non_unique_count += 1 if type_ in types else 0
+		used = set(fragment_bodies) | {match.group(1) for match in _BEAD_PATTERN.finditer(cg)}
+		def unique_fragname(bead_type):
+			if bead_type not in used and _fragname_to_type(bead_type) == bead_type:
+				return bead_type
+			for letter in reversed(string.ascii_uppercase):
+				if bead_type + letter not in used:
+					return bead_type + letter
+			raise ValueError(f"No unique fragment name left for bead type {bead_type}.")
 
-		# assembling the aa string again
-		aa = ','.join(new_aa_parts) + ',' + aa if new_aa_parts else aa
+		copies = {} # (old fragment, new type) -> new fragment, so beads sharing a fragment share the copy
+		new_definitions = []
+		replacements = [] # (start, end, new fragment) of the fragment names in the cg part
+		for name, bead_type in bead_change.items():
+			match = beads[name]
+			fragname = match.group(1)
+			if _fragname_to_type(fragname) == bead_type:
+				continue
+			if (fragname, bead_type) not in copies:
+				new_fragname = unique_fragname(bead_type)
+				used.add(new_fragname)
+				copies[(fragname, bead_type)] = new_fragname
+				if fragname in fragment_bodies: # fragments without atoms (e.g. virtual sites) have no definition
+					new_definitions.append(f'#{new_fragname}{fragment_bodies[fragname]}')
+			replacements.append((match.start(1), match.end(1), copies[(fragname, bead_type)]))
 
-		# assembling the cg string again
-		for i, idx in enumerate(indices):
-			cg[idx] = f'[#{types[i]};n={names[i]}]'
-		cg_string = ''.join(cg)
-		self.cgs_string = f'{{{cg_string}}}.{{{aa}}}'
+		for start, end, new_fragname in sorted(replacements, reverse=True):
+			cg = cg[:start] + new_fragname + cg[end:]
+		self.cgs_string = f'{{{cg}}}.{{{",".join(new_definitions + definitions)}}}'
 
 		self.cg_graph, self.aa_graph = (
 			cgsmiles.MoleculeResolver.from_string(self.cgs_string).resolve()
@@ -599,12 +678,20 @@ class CGMapping:
 			self.molname = molname
 		else:
 			self.molname = list(self.ff.blocks.keys())[0]
+		# types and masses as read, so changes are always reported relative to the ITP file
+		self._itp_original = {node: (d['atype'], d.get('mass'))
+							  for node, d in self.ff.blocks[self.molname].nodes(data=True)}
 
 	def _itp_to_cg_nodes(self):
 		'''
 		Map the nodes of the loaded ITP block to cg_graph nodes via their atom names.
 		'''
-		cg_by_name = {attrs["atomname"]: n for n, attrs in self.cg_graph.nodes(data=True)}
+		cg_by_name = {}
+		for n, attrs in self.cg_graph.nodes(data=True):
+			if attrs["atomname"] in cg_by_name:
+				raise ValueError(f"Bead name {attrs['atomname']} is not unique in the CGSmiles string, "
+								 "so the beads cannot be matched to the ITP by name.")
+			cg_by_name[attrs["atomname"]] = n
 		mapping = {}
 		for node, d in self.ff.blocks[self.molname].nodes(data=True):
 			if d["atomname"] not in cg_by_name:
@@ -622,51 +709,107 @@ class CGMapping:
 				for name, interactions in block.interactions.items() if name.startswith('virtual_sites')
 				for interaction in interactions}
 
-	def change_itp(self):
-		if self.ff is None:
-			raise RuntimeError("No ITP loaded, call read_itp() first.")
-		comments = {}
-		itp_to_cg = self._itp_to_cg_nodes()
-		for node, d in self.ff.blocks[self.molname].nodes(data=True):
-			cg_node = itp_to_cg[node]
-			if d['atype'] != self.cg_graph.nodes[cg_node]["atype"]:
-				comments[node] = f"changed from {d['atype']} to {self.cg_graph.nodes[cg_node]['atype']}"
-				d['atype'] = self.cg_graph.nodes[cg_node]["atype"]
-		return comments
-
-	def write_itp(self, path_out, outname=None):
-		comments = self.change_itp()
-		outname = outname if outname else self.molname
-	
-		itp_writer(outname, self.ff.blocks[self.molname], self.cgs_string, path_out)	
-		add_comments_itp(comments, f'{path_out}/{outname}.itp')
-
-	### PKa prediction methods
-	def predict_pka(self, show_protontation_reactions=False, show_protonation_map=True, print_pka_values=False):
-		"""
-		Predict the pKa values of the molecule.
+	def _apply_cg_types(self, block):
+		'''
+		Set the atom types of block to the bead types of cg_graph. If the bead size changes and the
+		atom has the default Martini mass of its original size, the mass is changed to the default
+		of the new size. Changes are relative to the ITP as read.
 
 		Returns
 		-------
 		dict
-			A dictionary with predicted pKa values and associated information.
+			{block node: comment describing the change}
+		'''
+		comments = {}
+		itp_to_cg = self._itp_to_cg_nodes()
+		for node, d in block.nodes(data=True):
+			old_type, old_mass = self._itp_original[node]
+			new_type = self.cg_graph.nodes[itp_to_cg[node]]["atype"]
+			d['atype'] = new_type
+			d['mass'] = old_mass
+			if new_type == old_type:
+				continue
+			changes = [f"changed from {old_type} to {new_type}"]
+			old_size, new_size = _bead_size(old_type), _bead_size(new_type)
+			if (old_size and new_size and old_size != new_size and old_mass is not None
+					and np.isclose(old_mass, MARTINI_MASSES[old_size])):
+				d['mass'] = MARTINI_MASSES[new_size]
+				changes.append(f"mass {old_mass:g} -> {d['mass']:g}")
+			comments[node] = ', '.join(changes)
+		return comments
+
+	def change_itp(self):
+		'''
+		Update the loaded ITP to the bead types of the CGSmiles string (see _apply_cg_types).
+
+		Returns
+		-------
+		dict
+			{ITP block node: comment describing the change}
+		'''
+		if self.ff is None:
+			raise RuntimeError("No ITP loaded, call read_itp() first.")
+		return self._apply_cg_types(self.ff.blocks[self.molname])
+
+	def write_itp(self, path_out, outname=None):
+		'''
+		Write the loaded ITP with the bead types of the CGSmiles string to <path_out>/<outname>.itp.
+		Changed atoms are commented. The loaded ITP itself is not modified.
+		'''
+		if self.ff is None:
+			raise RuntimeError("No ITP loaded, call read_itp() first.")
+		block = copy.deepcopy(self.ff.blocks[self.molname])
+		comments = self._apply_cg_types(block)
+		outname = outname if outname else self.molname
+		path = itp_writer(outname, block, self.cgs_string, path_out)
+		# the atoms are numbered in the ITP in the order of the block, starting at 1
+		itp_index = {node: i for i, node in enumerate(block.nodes, start=1)}
+		add_comments_itp({itp_index[node]: comment for node, comment in comments.items()}, path)
+
+	### PKa prediction methods
+	def predict_pka(self, show_protonation_reactions=False, show_protonation_map=True, print_pka_values=False):
 		"""
-		mol, _ = self._build_mol(opts=DrawOptions())
+		Predict the pKa values of the molecule with pkasolver.
 
-		warnings.filterwarnings("ignore", category=FutureWarning)
-		logging.disable(logging.CRITICAL)
+		Parameters
+		----------
+		show_protonation_reactions : bool
+			Display the network of protonation reactions.
+		show_protonation_map : bool
+			Display the pKa map.
+		print_pka_values : bool
+			Print the pKa values.
 
-		with suppress_output():
-			pka_results = calculate_microstate_pka_values(mol)
-		
-		IPythonConsole.molSize = 400,400
-		if show_protontation_reactions:
-			print('Drawing pKa reaction network...')
-			display(draw_pka_reactions(pka_results))
+		Returns
+		-------
+		list
+			The protonation states with their predicted pKa values.
+		"""
+		mol, _ =cgsmiles_to_rdkit(self.aa_graph, add_hydrogens=False)
+		SanitizeMol(mol)
+		rdDepictor.Compute2DCoords(mol)
 
-		if show_protonation_map:
-			print('Drawing pKa map...')
-			display(draw_pka_map(pka_results))
+		# silence pkasolver (warnings, logging and output of the underlying libraries) only during the prediction
+		previous_logging_level = logging.root.manager.disable
+		try:
+			with warnings.catch_warnings(), suppress_output():
+				warnings.simplefilter("ignore", category=FutureWarning)
+				logging.disable(logging.CRITICAL)
+				pka_results = calculate_microstate_pka_values(mol)
+		finally:
+			logging.disable(previous_logging_level)
+
+		previous_size = IPythonConsole.molSize
+		IPythonConsole.molSize = 400, 400
+		try:
+			if show_protonation_reactions:
+				print('Drawing pKa reaction network...')
+				display(draw_pka_reactions(pka_results))
+			if show_protonation_map:
+				print('Drawing pKa map...')
+				display(draw_pka_map(pka_results))
+		finally:
+			IPythonConsole.molSize = previous_size
 
 		if print_pka_values:
 			for state in pka_results:
