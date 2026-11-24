@@ -78,6 +78,26 @@ def test_save_accepts_path(simple, tmp_path):
 	assert path == tmp_path / 'drawing.svg' and path.read_text().startswith('<?xml')
 
 
+def test_save_png(simple, tmp_path):
+	from PIL import Image
+	path = simple.save(tmp_path / 'drawing.png', canvas_size=(300, 200), dpi=192)
+	assert path == tmp_path / 'drawing.png'
+	with Image.open(path) as image:
+		assert image.format == 'PNG' and image.size == (600, 400) # 2x at 192 dpi
+	with Image.open(simple.save(tmp_path / 'default.PNG', canvas_size=(96, 96))) as image:
+		assert image.size == (300, 300) # 300 dpi by default, extension case-insensitive
+
+
+def test_save_rejects_other_image_formats(simple, tmp_path):
+	with pytest.raises(ValueError, match='svg or .png'):
+		simple.save(tmp_path / 'drawing.pdf')
+	assert not list(tmp_path.iterdir())
+
+
+def test_save_appends_svg_to_other_extensions(simple, tmp_path):
+	assert simple.save(tmp_path / 'mol_v1.2').name == 'mol_v1.2.svg'
+
+
 def test_get_smiles(simple):
 	assert simple.get_smiles() == 'CCCCCO'
 	assert simple.get_smiles(add_hydrogens=True).count('[H]') == 12

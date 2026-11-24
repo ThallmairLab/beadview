@@ -7,9 +7,12 @@ from rdkit.Chem import MolToSmiles
 from . import cgsmiles_string, pka, structure
 from .beads import fragname_to_type
 from .drawing.options import DrawOptions
-from .drawing.render import Renderer, show_cgsmiles_drawing, show_svg
+from .drawing.render import Renderer, show_cgsmiles_drawing, show_svg, svg_to_png
 from .rdkit_conv import cgsmiles_to_rdkit
 from .topology import Topology
+
+# image formats save() rejects instead of writing <name>.<format>.svg
+UNSUPPORTED_IMAGE_FORMATS = {'.pdf', '.eps', '.ps', '.jpg', '.jpeg', '.tif', '.tiff', '.gif', '.webp', '.bmp'}
 
 
 class CGMapping:
@@ -57,12 +60,24 @@ class CGMapping:
 		'''
 		return Renderer(self, self._options(kwargs)).svg()
 
-	def save(self, path, **kwargs):
-		'''Save the drawing (see to_svg) as SVG; .svg is appended if path has another extension.'''
+	def save(self, path, dpi=300, **kwargs):
+		'''
+		Save the drawing (see to_svg, which takes the drawing options) as SVG or PNG, chosen by the extension of path.
+		Without .svg or .png extension, .svg is appended. dpi sets the resolution of PNGs (SVG pixels are 1/96 inch);
+		PNGs need resvg-py (the [show] extra).
+		Returns the path written.
+		'''
 		path = Path(path)
-		if path.suffix != '.svg':
-			path = path.with_name(path.name + '.svg')
-		path.write_text(self.to_svg(**kwargs))
+		suffix = path.suffix.lower()
+		if suffix in UNSUPPORTED_IMAGE_FORMATS:
+			raise ValueError(f"Cannot save as {suffix[1:]}, use a .svg or .png file.")
+		if suffix not in ('.svg', '.png'):
+			path, suffix = path.with_name(path.name + '.svg'), '.svg'
+		svg_text = self.to_svg(**kwargs)
+		if suffix == '.png':
+			path.write_bytes(svg_to_png(svg_text, zoom=dpi / 96))
+		else:
+			path.write_text(svg_text)
 		return path
 
 	def show(self, ax=None, **kwargs):

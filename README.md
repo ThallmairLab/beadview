@@ -21,7 +21,7 @@ The other features need these extras:
 
 | extra       | enables                                   | installs                                   |
 |-------------|-------------------------------------------|--------------------------------------------|
-| `show`      | `show()` outside notebooks and on matplotlib axes, `show_default()` | matplotlib, pillow, resvg-py, scipy |
+| `show`      | `show()` outside notebooks and on matplotlib axes, `save()` as PNG, `show_default()` | matplotlib, pillow, resvg-py, scipy |
 | `structure` | `aa_structure()`, `cg_structure()`        | MDAnalysis                                 |
 | `itp`       | `read_itp()`, `change_itp()`, `write_itp()` | vermouth                                 |
 | `all`       | all of the above                          |                                            |
@@ -43,6 +43,7 @@ mapping = CGMapping("{[#SC3;n=A][#SN4;n=B][#SP1;n=C]}.{#SC3=CC[$],#SN4=[$]CC[$],
 mapping                                           # last line of a Jupyter/marimo cell: shows the drawing
 mapping.show(show_bead_labels=True)               # vector image in Jupyter/marimo, else matplotlib
 mapping.save("pentanol.svg", style="outline")     # SVG file
+mapping.save("pentanol.png", dpi=600)             # PNG file, format from the extension (needs [show])
 svg = mapping.to_svg(scale_factor=2)              # SVG string
 
 opts = DrawOptions(show_hydrogens=True, show_bead_labels=True)
