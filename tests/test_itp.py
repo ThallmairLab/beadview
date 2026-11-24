@@ -1,6 +1,8 @@
 import pytest
 
-from cgsmiles_utils.topology import itp_writer, add_comments_itp
+from conftest import DATA
+
+from cgsmiles_utils.topology import ITPConsistencyWarning, itp_writer, add_comments_itp
 
 
 def atom_lines(path):
@@ -81,7 +83,8 @@ def test_duplicate_bead_names_are_rejected(tmp_path):
 	mapping = CGMapping("{[#SC3;n=A][#SN4;n=A]}.{#SC3=CC[$],#SN4=[$]CO}")
 	itp = tmp_path / 'dup.itp'
 	itp.write_text("[ moleculetype ]\nDUP 1\n[ atoms ]\n1 SC3 1 DUP A 1 0 54\n2 SN4 1 DUP A 2 0 54\n")
-	mapping.read_itp(itp)
+	with pytest.warns(ITPConsistencyWarning, match='not unique'):
+		mapping.read_itp(itp)
 	with pytest.raises(ValueError, match='not unique'):
 		mapping.change_itp()
 
@@ -133,3 +136,46 @@ def test_write_itp_keeps_other_residue_names(tmp_path):
 	path = mapping.write_itp(tmp_path / 'NEW.itp')
 	assert moleculetype(path) == 'NEW'
 	assert [line.split()[3] for line in atom_lines(path).values()] == ['RA', 'RB']
+
+
+def check_problems(string, itp_text, tmp_path):
+	from cgsmiles_utils import CGMapping
+	itp = tmp_path / 'check.itp'
+	itp.write_text(itp_text)
+	with pytest.warns(ITPConsistencyWarning) as record:
+		CGMapping(string).read_itp(itp)
+	return [str(warning.message) for warning in record]
+
+
+ATOMS = "[ moleculetype ]\nMOL 1\n[ atoms ]\n1 SC3 1 MOL A 1 0 54\n2 SN4 1 MOL B 2 0 54\n"
+
+
+def test_check_missing_beads(tmp_path):
+	problems = check_problems("{[#SC3;n=A][#SN4;n=C]}.{#SC3=CC[$],#SN4=[$]CO}", ATOMS, tmp_path)
+	assert any('Atoms B of the ITP' in p for p in problems)
+	assert any('Beads C of the CGSmiles string' in p for p in problems)
+
+
+def test_check_virtual_sites(tmp_path):
+	# B is a virtual site in the ITP but bonded in the string
+	itp = ATOMS + "[ virtual_sitesn ]\n2 1 1\n"
+	problems = check_problems("{[#SC3;n=A][#SN4;n=B]}.{#SC3=CC[$],#SN4=[$]CO}", itp, tmp_path)
+	assert problems == ['B is a virtual site in the ITP but bonded to other beads in the CGSmiles string.']
+
+
+def test_check_charges(tmp_path):
+	problems = check_problems("{[#SC3;n=A][#SQ5;n=B;q=-1]}.{#SC3=CC[$],#SQ5=[$]C[O-]}", ATOMS, tmp_path)
+	assert problems == ['B has charge -1 in the CGSmiles string but 0 in the ITP (the ITP charge is kept).']
+
+
+def test_check_ignores_bonds(azobenzene, tmp_path):
+	import warnings
+	from cgsmiles_utils import CGMapping
+	itp = tmp_path / 'bond.itp'
+	# A and C are not neighbors in the string, the ITP bonds them anyway
+	itp.write_text("[ moleculetype ]\nMOL 1\n[ atoms ]\n1 SC3 1 MOL A 1 0 54\n2 SN4 1 MOL B 2 0 54\n"
+				   "3 SP1 1 MOL C 3 0 54\n[ bonds ]\n1 2 1 0.4 5000\n2 3 1 0.4 5000\n1 3 1 0.6 5000\n")
+	with warnings.catch_warnings():
+		warnings.simplefilter('error', ITPConsistencyWarning)
+		CGMapping("{[#SC3;n=A][#SN4;n=B][#SP1;n=C]}.{#SC3=CC[$],#SN4=[$]CC[$],#SP1=[$]CO}").read_itp(itp)
+		azobenzene.read_itp(DATA / 'azobenzene.itp') # consistent test case

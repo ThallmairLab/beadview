@@ -1,4 +1,5 @@
 import copy
+import warnings
 from dataclasses import replace
 from pathlib import Path
 
@@ -10,7 +11,7 @@ from .beads import fragname_to_type
 from .drawing.options import DrawOptions
 from .drawing.render import Renderer, show_cgsmiles_drawing, show_svg, svg_to_png
 from .rdkit_conv import cgsmiles_to_rdkit
-from .topology import Topology
+from .topology import ITPConsistencyWarning, Topology
 
 # image formats save() rejects instead of writing <name>.<format>.svg
 UNSUPPORTED_IMAGE_FORMATS = {'.pdf', '.eps', '.ps', '.jpg', '.jpeg', '.tif', '.tiff', '.gif', '.webp', '.bmp'}
@@ -163,8 +164,13 @@ class CGMapping:
 		return variant
 
 	def read_itp(self, path_in, molname=None):
-		'''Load an ITP file; molname selects the molecule type, by default the first one.'''
+		'''
+		Load an ITP file; molname selects the molecule type, by default the first one. Inconsistencies with
+		the CGSmiles string (see Topology.check) are reported as ITPConsistencyWarning.
+		'''
 		self.topology = Topology.from_itp(path_in, molname)
+		for problem in self.topology.check(self.cg_graph):
+			warnings.warn(problem, ITPConsistencyWarning, stacklevel=2)
 		return self.topology
 
 	def _require_topology(self):

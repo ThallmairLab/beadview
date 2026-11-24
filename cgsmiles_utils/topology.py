@@ -39,6 +39,10 @@ def _read_itp(lines, ff):
 	return list(CommentKeepingParser(ff).parse(iter(lines)))
 
 
+class ITPConsistencyWarning(UserWarning):
+	'''The loaded ITP and the CGSmiles string do not match, see Topology.check.'''
+
+
 class Topology:
 	'''
 	A molecule type read from an ITP file.
@@ -94,6 +98,54 @@ class Topology:
 				raise ValueError(f"Atom {d['atomname']} of the ITP has no bead with this name in the CGSmiles string.")
 			mapping[node] = cg_by_name[d["atomname"]]
 		return mapping
+
+	def check(self, cg_graph):
+		'''
+		Differences between the molecule type and the CG graph of a CGSmiles string that would make them
+		inconsistent: bead names that are not unique or present in only one of them, beads that are virtual sites
+		in only one of them (order-0 beads in the string, virtual_sites entries in the ITP) and beads whose charge
+		differs (q= in the string). Bonds and other interactions are not compared with the string.
+
+		Returns
+		-------
+		list of str
+			One message per problem, empty if they are consistent.
+		'''
+		from .beads import detect_virtual_nodes
+		problems = []
+		itp_names, cg_names = {}, {}
+		for names, nodes, where in ((itp_names, self.block.nodes(data=True), 'ITP'),
+									(cg_names, cg_graph.nodes(data=True), 'CGSmiles string')):
+			duplicates = []
+			for node, data in nodes:
+				if data['atomname'] in names:
+					duplicates.append(data['atomname'])
+				names[data['atomname']] = node
+			if duplicates:
+				problems.append(f"Bead names {', '.join(sorted(set(duplicates)))} are not unique in the {where}, "
+								"so the beads cannot be matched to the ITP by name.")
+		only_itp = [name for name in itp_names if name not in cg_names]
+		only_cg = [name for name in cg_names if name not in itp_names]
+		if only_itp:
+			problems.append(f"Atoms {', '.join(only_itp)} of the ITP have no bead with this name in the CGSmiles string.")
+		if only_cg:
+			problems.append(f"Beads {', '.join(only_cg)} of the CGSmiles string are not in the ITP.")
+
+		itp_vs = {self.block.nodes[interaction.atoms[0]]['atomname'] # the virtual site is the first atom of each entry
+				  for name, interactions in self.block.interactions.items() if name.startswith('virtual_sites')
+				  for interaction in interactions}
+		cg_vs = {cg_graph.nodes[node]['atomname'] for node in detect_virtual_nodes(cg_graph)}
+		for name in (name for name in itp_names if name in cg_names):
+			if name in itp_vs and name not in cg_vs:
+				problems.append(f"{name} is a virtual site in the ITP but bonded to other beads in the CGSmiles string.")
+			elif name in cg_vs and name not in itp_vs:
+				problems.append(f"{name} is a virtual site in the CGSmiles string (only order-0 bonds) but not in the ITP.")
+			cg_charge = float(cg_graph.nodes[cg_names[name]].get('charge', 0.0))
+			itp_charge = float(self.block.nodes[itp_names[name]].get('charge', 0.0))
+			if not np.isclose(cg_charge, itp_charge, atol=1e-6):
+				problems.append(f"{name} has charge {cg_charge:g} in the CGSmiles string but {itp_charge:g} in the ITP "
+								"(the ITP charge is kept).")
+		return problems
 
 	def virtual_sites(self, cg_graph):
 		'''

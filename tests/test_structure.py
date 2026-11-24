@@ -81,6 +81,7 @@ def test_cg_structure_needs_all_beads_in_itp(tmp_path):
 	mapping = CGMapping("{[#SC3;n=A][#SN4;n=B]}.{#SC3=CC[$],#SN4=[$]CO}")
 	itp = tmp_path / 'one.itp'
 	itp.write_text("[ moleculetype ]\nONE 1\n[ atoms ]\n1 SC3 1 ONE A 1 0 54\n")
-	mapping.read_itp(itp)
+	with pytest.warns(UserWarning, match='Beads B of the CGSmiles string are not in the ITP'):
+		mapping.read_itp(itp)
 	with pytest.raises(ValueError, match='B are not in the loaded ITP'):
 		mapping.cg_structure(tmp_path / 'x_cg.gro', write_aa=False)
