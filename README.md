@@ -1,5 +1,7 @@
 # beadview
 
+[![tests](https://github.com/ThallmairLab/beadview/actions/workflows/tests.yml/badge.svg)](https://github.com/ThallmairLab/beadview/actions/workflows/tests.yml)
+
 Utilities for coarse-grained (Martini) mappings written as [CGSmiles](https://github.com/gruenewald-lab/CGsmiles) strings:
 
 - **drawing**: the all-atom molecule with its beads as SVG, with bead labels and the bonds, angles and dihedrals of an ITP
@@ -7,14 +9,21 @@ Utilities for coarse-grained (Martini) mappings written as [CGSmiles](https://gi
 - **ITP editing**: write an ITP with the bead types of the string, with comments on every changed atom
 - **bead type changes** directly in the CGSmiles string
 
-Strings with more than two resolutions are resolved down to the atoms: the second-to-last resolution gives the beads,
-and the one above it their residues (`resname`, `resid` on the beads).
+Strings with more than two resolutions are supported, see [More than two resolutions](#more-than-two-resolutions).
 
 ## Installation
 
-From a clone of this repository:
+From GitHub:
 
 ```bash
+pip install "beadview[all] @ git+https://github.com/ThallmairLab/beadview.git"
+```
+
+or from a clone of this repository:
+
+```bash
+git clone git@github.com:ThallmairLab/beadview.git
+cd beadview
 pip install ".[all]"        # or -e for an editable install
 ```
 
@@ -59,45 +68,6 @@ mapping.change_bead_types({"A": "SN4"})           # new bead type for the bead n
 mapping.get_smiles()                              # 'CCCCCO'
 ```
 
-### ITP files (needs `[itp]`)
-
-```python
-mapping = CGMapping(cgs_string)
-mapping.read_itp("molecule.itp")                  # first molecule type, or molname="..."
-mapping.show(show_bonds=True, show_angles=True, show_dihedrals=True)
-mapping.show(show_vs_construction=True)           # which beads construct each virtual site
-mapping.show(show_angles=True, highlight_beads=["R1"])  # only the angles that include R1
-
-mapping.change_bead_types({"R2": "TN1"})
-mapping.change_itp()                              # preview: {block node: 'changed from TC5 to TN1'}
-mapping.write_itp("itps/MOL.itp")                 # molecule type (and residue) named MOL
-mapping.cg_structure("MOL.gro", resname="MOL")    # beads in the atom order of the ITP
-```
-
-ITP atoms are matched to beads by name (`n=`). `read_itp` warns (`ITPConsistencyWarning`) about bead names that are
-not unique or missing on one side and bead charges (`q=`) that differ from the ITP. Bonds, virtual sites and other
-interactions are not compared with the string.
-
-`write_itp` writes the bead types of the CGSmiles string, marks every changed atom with a comment and updates the
-mass when the bead size changes (T/S/R = 36/54/72) and the mass was the default one. Charges are not changed.
-The CGSmiles string is written into the header of the ITP; the loaded ITP itself is never modified.
-
-`change_bead_types` edits the CGSmiles string and checks the result with cgsmiles: the new string must resolve to
-the same atoms and beads, with the requested bead types.
-
-#### Scanning bead types
-
-`with_bead_types` returns a changed copy of a mapping that shares its ITP, so the ITP is read only once:
-
-```python
-base = CGMapping(cgs_string)
-base.read_itp(itp_path, molname)
-for name, bead_change in zip(["V1", "V2"], [{"N6": "TN2a"}, {"N6": "TN3a", "R3": "TC5e"}]):
-    variant = base.with_bead_types(bead_change)
-    variant.write_itp(f"itps/{name}.itp")                          # molecule type and residue name = name
-    variant.cg_structure(f"solute/{name}.gro", resname=name)        # bead order from the ITP
-```
-
 ## CGSmiles annotations used
 
 | annotation | on    | meaning |
@@ -107,8 +77,7 @@ for name, bead_change in zip(["V1", "V2"], [{"N6": "TN2a"}, {"N6": "TN3a", "R3":
 | `w=`       | atom  | mapping weight of the atom in the bead position (default 1) |
 | `wVS=`     | atom  | weight of the atom in the position of a neighboring virtual site; a hydrogen without one uses the value of its heavy atom (default: `w`) |
 
-A bead connected to the rest of the molecule only by bonds of order 0 is a virtual site. It is
-placed at the weighted center of the atoms of its neighboring beads.
+A bead connected to the rest of the molecule only by bonds of order 0 is a virtual site. It is placed at the weighted center of the atoms of its neighboring beads.
 
 Bead types follow Martini 3: an optional size letter (`T`, `S`, `R` = regular), the chemical class (`C`, `N`, `P`,
 `Q`, `X`, `D`; it sets the default drawing color) and its level, e.g. `TC5`, `SN4a`, `P1`. `U` marks a dummy bead.
@@ -167,11 +136,6 @@ With the default `rotate_by='auto'` the molecule is oriented automatically:
 3. of the remaining equivalent orientations (rotated by 180 degrees and/or mirrored), the one with the first beads
    of the CGSmiles string on the left (and, second, at the top) is used.
 
-The heavy atoms are laid out and oriented first and the hydrogens placed around them, so drawings with and without
-`show_hydrogens` show the same skeleton in the same orientation. With `fixed_coords` or `align_to`, `'auto'` keeps the
-orientation they give. Use `'auto+<degrees>'` and `flip` to adjust the result, and `check_orientation=True` to print
-what was done.
-
 For a series of related molecules, `align_to` places the atoms a molecule has in common with a reference (maximum
 common substructure, at least 3 atoms) where they are in the reference drawn with the same options:
 
@@ -194,12 +158,3 @@ from beadview import parallel_tails
 lipid.save("popc.svg", fixed_coords=parallel_tails())
 lipid.save("popc_h.svg", fixed_coords=parallel_tails(spacing=6), show_hydrogens=True, rotate_by=180)
 ```
-
-## Development
-
-```bash
-pip install -e ".[dev]"
-pytest
-```
-
-The tests run on GitHub Actions for Python 3.11–3.13.
