@@ -2,6 +2,8 @@ import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from .orientation import parse_rotation
+
 REFERENCE_SCALE = 25 # drawing scale (pixels per unit of the RDKit 2D coordinates) at scale_factor=1
 
 # default colors of the virtual site constructions, angles and dihedrals, cycled one color per interaction
@@ -19,12 +21,20 @@ class DrawOptions:
 	canvas_size: tuple | str = 'auto' # (width, height) in pixels, or 'auto' to fit the canvas to the drawing
 	padding: float = 10.0 # space around the drawing with canvas_size='auto'
 	scale_factor: float = 1
-	rotate_by: float = 0 # rotation of the molecule in degrees
-	flip: bool = False # mirror the molecule horizontally
+	# 'auto': orient the molecule automatically (CG backbone horizontal, bonds at multiples of 30 degrees, first
+	# beads of the CGSmiles string left and top); 'auto+90' / 'auto-30': rotate clockwise by that many degrees
+	# afterwards; a number: clockwise rotation in degrees of the RDKit layout without automatic orientation. With fixed_coords
+	# or align_to, 'auto' keeps their orientation.
+	rotate_by: float | str = 'auto'
+	flip: bool = False # mirror the molecule horizontally (before the rotation of rotate_by)
 	# fixed 2D coordinates of atoms, {aa_graph node: (x, y)} in RDKit units (bond length 1.5, y up), or a function
 	# aa_graph -> such a dict, e.g. parallel_tails(); RDKit lays out the other atoms around them. Applied before
 	# rotate_by and flip.
 	fixed_coords: dict | Callable | None = None
+	# a CGMapping or CGSmiles string: the atoms the molecule has in common with it (maximum common substructure)
+	# are placed as in its drawing with the same options, for consistent drawings of a series of molecules
+	align_to: object | None = None
+	coordgen: bool = False # lay out the molecule with RDKit's CoordGen instead of its default depictor
 	remove_background: bool = True # transparent instead of white background
 
 	# atomistic molecule
@@ -75,11 +85,13 @@ class DrawOptions:
 	line_spacing: float = 4.0 # distance between angle/dihedral lines that would otherwise overlap
 
 	# debugging
-	check_orientation: bool = False # report (and highlight in red) the most vertical bond of the molecule
+	# report how the molecule was oriented and the most vertical bond of the molecule, highlighted in red
+	check_orientation: bool = False
 
 	def __post_init__(self):
 		if self.canvas_size != 'auto' and (isinstance(self.canvas_size, str) or len(self.canvas_size) != 2):
 			raise ValueError(f"canvas_size must be (width, height) or 'auto', got {self.canvas_size!r}")
+		parse_rotation(self.rotate_by) # raises ValueError for invalid values
 		if self.style not in ('beads', 'outline'):
 			raise ValueError(f"style must be 'beads' or 'outline', got '{self.style}'")
 		for option in ('fill_alpha', 'border_alpha'):

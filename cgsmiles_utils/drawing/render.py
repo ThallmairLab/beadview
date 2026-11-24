@@ -6,15 +6,14 @@ import sys
 from dataclasses import dataclass
 
 import numpy as np
-from rdkit.Chem import rdDepictor
 from rdkit.Chem.Draw import rdMolDraw2D
 from rdkit.Geometry.rdGeometry import Point2D
 
 from ..beads import BeadType, bead_positions as compute_bead_positions
-from ..rdkit_conv import cgsmiles_to_rdkit
 from . import svg
-from .geometry import flip_molecule, rotate_molecule, most_vertical_bonds, offset_path, offset_side
+from .geometry import most_vertical_bonds, offset_path, offset_side
 from .labels import label_extent, label_above_bead, optimize_label_positions
+from .orientation import layout_molecule
 from .options import ANGLE_PALETTE, DIHEDRAL_PALETTE, REFERENCE_SCALE, VS_PALETTE
 
 INITIAL_CANVAS = (300, 300) # canvas the molecule is drawn on with canvas_size='auto', before it is fitted
@@ -59,26 +58,8 @@ class Renderer:
 		return self.drawer.GetDrawCoords(self.idx_map[atom])
 
 	def _build_mol(self):
-		mol, idx_map = cgsmiles_to_rdkit(self.mapping.aa_graph, add_hydrogens=self.opts.show_hydrogens)
-		rdDepictor.Compute2DCoords(mol, coordMap=self._coord_map(idx_map))
-		if self.opts.flip:
-			flip_molecule(mol)
-		rotate_molecule(mol, self.opts.rotate_by)
+		mol, idx_map, self.orientation = layout_molecule(self.mapping.aa_graph, self.mapping.cg_graph, self.opts)
 		return mol, idx_map
-
-	def _coord_map(self, idx_map):
-		'''{RDKit atom index: Point2D} of the atoms fixed by opts.fixed_coords.'''
-		fixed = self.opts.fixed_coords
-		if fixed is None:
-			return {}
-		aa_graph = self.mapping.aa_graph
-		if callable(fixed):
-			fixed = fixed(aa_graph)
-		unknown = [node for node in fixed if node not in aa_graph]
-		if unknown:
-			raise ValueError(f"fixed_coords contains nodes that are not atoms of the aa_graph: {unknown}")
-		# hydrogens are not in the molecule when they are not drawn
-		return {idx_map[node]: Point2D(*map(float, xy)) for node, xy in fixed.items() if node in idx_map}
 
 	def _make_drawer(self):
 		opts = self.opts
@@ -99,6 +80,7 @@ class Renderer:
 		'''The drawing as SVG string.'''
 		opts = self.opts
 		if opts.check_orientation:
+			print(self.orientation.describe())
 			angle, vertical_bonds = most_vertical_bonds(self.mol, tolerance=0.02)
 			if abs(angle) < 0.5:
 				print(f"Found vertical lines with angle {angle:+.2f} degrees")

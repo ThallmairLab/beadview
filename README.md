@@ -126,9 +126,11 @@ Lengths are in pixels at `scale_factor=1`.
 | `canvas_size` | `'auto'` | `'auto'` fits the image to the drawing; or a fixed `(width, height)`, e.g. to give several molecules the same scale |
 | `padding` | `10` | space around the drawing with `canvas_size='auto'` |
 | `scale_factor` | `1` | scales the molecule and all lengths |
-| `rotate_by` | `0` | rotation in degrees |
-| `flip` | `False` | mirror horizontally |
+| `rotate_by` | `'auto'` | `'auto'`: automatic orientation (see below); `'auto+90'`, `'auto-30'`: rotate clockwise by that many degrees afterwards; a number: clockwise rotation in degrees of RDKit's layout, without automatic orientation |
+| `flip` | `False` | mirror horizontally (before the rotation of `rotate_by`) |
 | `fixed_coords` | `None` | fixed 2D positions of atoms, `{aa_graph node: (x, y)}` in RDKit units (bond length 1.5), or a function `aa_graph -> dict` such as `parallel_tails()`; RDKit lays out the other atoms around them. Applied before `rotate_by` and `flip` |
+| `align_to` | `None` | a `CGMapping` or CGSmiles string: the atoms in common with it are placed as in its drawing, for consistent drawings of a series |
+| `coordgen` | `False` | lay out the molecule with RDKit's CoordGen instead of its default depictor |
 | `remove_background` | `True` | transparent background |
 | `show_hydrogens` | `False` | draw hydrogens |
 | `color_atoms` | `False` | color heteroatoms by element |
@@ -155,7 +157,30 @@ Lengths are in pixels at `scale_factor=1`.
 | `cg_line_width` | `2.0` | width of the interaction lines |
 | `cg_line_offset` | `8.0` | distance of angle/dihedral lines from the bonds they follow |
 | `line_spacing` | `4.0` | distance between overlapping angle/dihedral lines |
-| `check_orientation` | `False` | report and highlight the most vertical bond |
+| `check_orientation` | `False` | report how the molecule was oriented, and report and highlight the most vertical bond |
+
+### Orientation
+
+With the default `rotate_by='auto'` the molecule is oriented automatically:
+
+1. the principal axis of the bead positions is turned horizontal, so the CG backbone runs left to right,
+2. the drawing is rotated by the smallest angle that puts most bonds at multiples of 30 degrees,
+3. of the remaining equivalent orientations (rotated by 180 degrees and/or mirrored), the one with the first beads
+   of the CGSmiles string on the left (and, second, at the top) is used.
+
+The heavy atoms are laid out and oriented first and the hydrogens placed around them, so drawings with and without
+`show_hydrogens` show the same skeleton in the same orientation. With `fixed_coords` or `align_to`, `'auto'` keeps the
+orientation they give. Use `'auto+<degrees>'` and `flip` to adjust the result, and `check_orientation=True` to print
+what was done.
+
+For a series of related molecules, `align_to` places the atoms a molecule has in common with a reference (maximum
+common substructure, at least 3 atoms) where they are in the reference drawn with the same options:
+
+```python
+reference = CGMapping(series[0])
+for i, cgs in enumerate(series):
+    CGMapping(cgs).save(f"series_{i}.svg", align_to=reference)
+```
 
 ### Layout: straight, parallel tails
 

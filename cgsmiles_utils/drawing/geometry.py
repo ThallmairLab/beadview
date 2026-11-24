@@ -1,35 +1,7 @@
 '''
-Geometry helpers for drawing: transformations of the 2D molecule, offset paths and distance fields.
+Geometry helpers for drawing: bond directions, offset paths and distance fields.
 '''
 import numpy as np
-from rdkit.Chem import rdMolTransforms
-
-
-def rotate_molecule(mol, theta):
-	'''
-	Rotate the 2D conformer of a molecule in place around its centroid by theta degrees.
-	'''
-	conf = mol.GetConformer(0)
-	centroid = np.array([list(conf.GetAtomPosition(i)) for i in range(mol.GetNumAtoms())]).mean(axis=0)
-	to_origin, back = np.eye(4), np.eye(4)
-	to_origin[:3, 3] = -centroid
-	back[:3, 3] = centroid
-	theta = np.deg2rad(theta)
-	c, s = np.cos(theta), np.sin(theta)
-	rotation = np.array([
-		[c,  s, 0, 0],
-		[-s, c, 0, 0],
-		[0,  0, 1, 0],
-		[0,  0, 0, 1]
-	])
-	rdMolTransforms.TransformConformer(conf, back @ rotation @ to_origin)
-
-
-def flip_molecule(mol):
-	'''
-	Mirror the 2D conformer of a molecule in place horizontally (x -> -x).
-	'''
-	rdMolTransforms.TransformConformer(mol.GetConformer(0), np.diag([-1., 1., 1., 1.]))
 
 
 def most_vertical_bonds(mol, tolerance=0.02):
