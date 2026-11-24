@@ -118,24 +118,29 @@ def bead_outline(atom_positions, bonds, color, element_id, width, border_width, 
 	return ''.join(svg)
 
 
-def line(start, end, color='#000000', width=2.0):
+def line(start, end, color='#000000', width=2.0, dasharray=None, element_id=None):
 	'''
-	SVG line element, used for bonds and constraints between two beads.
+	SVG line element, used for bonds, constraints and virtual site constructions between two beads.
+	dasharray (e.g. '4,3') draws it dashed; element_id is used as id attribute.
 	'''
-	return (f'<line\n'
-			f'\tstyle="fill:none;stroke:{color};stroke-width:{width};stroke-linecap:round"\n'
+	dash = f';stroke-dasharray:{dasharray}' if dasharray else ''
+	id_attr = f'\n\tid={quoteattr(element_id)}' if element_id is not None else ''
+	return (f'<line{id_attr}\n'
+			f'\tstyle="fill:none;stroke:{color};stroke-width:{width};stroke-linecap:round{dash}"\n'
 			f'\tx1="{start[0]}"\n'
 			f'\ty1="{start[1]}"\n'
 			f'\tx2="{end[0]}"\n'
 			f'\ty2="{end[1]}" />\n')
 
 
-def polyline(points, color='#000000', width=2.0):
+def polyline(points, color='#000000', width=2.0, element_id=None):
 	'''
 	SVG polyline element through the given (x, y) points, used for angles and dihedrals.
+	element_id is used as id attribute.
 	'''
 	points_str = ' '.join(f'{p[0]},{p[1]}' for p in points)
-	return (f'<polyline\n'
+	id_attr = f'\n\tid={quoteattr(element_id)}' if element_id is not None else ''
+	return (f'<polyline{id_attr}\n'
 			f'\tstyle="fill:none;stroke:{color};stroke-width:{width};stroke-linecap:round;stroke-linejoin:round"\n'
 			f'\tpoints="{points_str}" />\n')
 

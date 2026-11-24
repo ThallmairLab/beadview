@@ -68,9 +68,52 @@ def test_custom_label_position(simple):
 	assert svg.count('<text') == 3
 
 
-def test_hidden_virtual_sites(azobenzene):
-	svg = azobenzene.to_svg(show_vs=False, show_angles=True, show_bead_labels=True)
-	assert 'circle_bead_U4' not in svg and 'circle_bead_R1' in svg
+def test_virtual_sites_are_always_drawn(azobenzene):
+	svg = azobenzene.to_svg(show_angles=True, show_bead_labels=True)
+	assert 'circle_bead_U4' in svg and 'circle_bead_U9' in svg
+	with pytest.raises(TypeError):
+		azobenzene.to_svg(show_vs=False)
+
+
+def element_colors(svg, prefix):
+	'''{id: stroke color} of the SVG elements whose id starts with prefix.'''
+	import re
+	return dict(re.findall(rf'id="({prefix}[^"]*)"\s*style="[^"]*stroke:([^;"]+)', svg))
+
+
+def test_vs_construction(azobenzene):
+	from cgsmiles_utils.drawing.options import VS_PALETTE
+	svg = azobenzene.to_svg(show_vs_construction=True, show_bead_labels=True)
+	colors = element_colors(svg, 'vs_')
+	assert set(colors) == {f'vs_U4_{b}' for b in ('R1', 'R2', 'R3')} | {f'vs_U9_{b}' for b in ('R6', 'R7', 'R8')}
+	assert {colors['vs_U4_R1'], colors['vs_U9_R6']} == set(VS_PALETTE[:2])
+	assert svg.count('stroke-dasharray:6,4') == 6
+	u4 = svg.split('id="circle_bead_U4"')[1].split('</g>')[0]
+	assert f'stroke:{VS_PALETTE[0]};stroke-opacity:1.0' in u4 # opaque border of the virtual site
+	single = element_colors(azobenzene.to_svg(show_vs_construction=True, vs_construction_colors='#123456'), 'vs_')
+	assert set(single.values()) == {'#123456'}
+	assert 'vs_' not in azobenzene.to_svg() # off by default
+
+
+def test_angle_and_dihedral_palettes(azobenzene):
+	from cgsmiles_utils.drawing.options import ANGLE_PALETTE, DIHEDRAL_PALETTE
+	svg = azobenzene.to_svg(show_angles=True, show_dihedrals=True)
+	angles = element_colors(svg, 'angle_')
+	assert len(angles) == 3 and set(angles.values()) == set(ANGLE_PALETTE[:3])
+	assert list(element_colors(svg, 'dihedral_').values()) == [DIHEDRAL_PALETTE[0]]
+	assert set(element_colors(azobenzene.to_svg(show_angles=True, angle_colors='#000000'), 'angle_').values()) == {'#000000'}
+	assert set(element_colors(azobenzene.to_svg(show_angles=True, angle_colors=['red']), 'angle_').values()) == {'red'}
+
+
+def test_highlight_beads(azobenzene):
+	svg = azobenzene.to_svg(show_bonds=True, show_angles=True, show_dihedrals=True, show_vs_construction=True,
+							highlight_beads=['R1'])
+	assert set(element_colors(svg, 'bond_')) == {'bond_R1_N5'}
+	assert set(element_colors(svg, 'constraint_')) == {'constraint_R1_R2', 'constraint_R1_R3'}
+	assert len(element_colors(svg, 'angle_')) == 2 and len(element_colors(svg, 'dihedral_')) == 1
+	assert set(element_colors(svg, 'vs_')) == {'vs_U4_R1', 'vs_U4_R2', 'vs_U4_R3'}
+	with pytest.raises(ValueError, match='XX'):
+		azobenzene.to_svg(show_bonds=True, highlight_beads=['XX'])
 
 
 def test_save_accepts_path(simple, tmp_path):

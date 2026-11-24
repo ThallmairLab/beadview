@@ -10,12 +10,12 @@ from rdkit.Chem import rdDepictor
 from rdkit.Chem.Draw import rdMolDraw2D
 from rdkit.Geometry.rdGeometry import Point2D
 
-from ..beads import BeadType, bead_positions as compute_bead_positions, detect_virtual_nodes
+from ..beads import BeadType, bead_positions as compute_bead_positions
 from ..rdkit_conv import cgsmiles_to_rdkit
 from . import svg
 from .geometry import flip_molecule, rotate_molecule, most_vertical_bonds, offset_path, offset_side
 from .labels import label_extent, label_above_bead, optimize_label_positions
-from .options import REFERENCE_SCALE
+from .options import ANGLE_PALETTE, DIHEDRAL_PALETTE, REFERENCE_SCALE, VS_PALETTE
 
 INITIAL_CANVAS = (300, 300) # canvas the molecule is drawn on with canvas_size='auto', before it is fitted
 
@@ -31,6 +31,8 @@ class DrawnBead:
 	color: str # fill color
 	base_radius: float # radius at scale_factor=1
 	dashed: bool = False # virtual site in the loaded ITP
+	border_color: str | None = None # None: opts.border_color
+	border_alpha: float | None = None # None: opts.border_alpha
 
 	def radius(self, scale_factor):
 		return self.base_radius * scale_factor
@@ -123,21 +125,17 @@ class Renderer:
 		Returns
 		-------
 		positions : dict
-			Drawing coordinates of all beads (including hidden virtual sites), keyed by cg_graph node.
+			Drawing coordinates of all beads, keyed by cg_graph node.
 		drawn : list of DrawnBead
-			The beads that are drawn, virtual sites last.
-		hidden : set
-			cg_graph nodes that are not drawn.
+			The beads, virtual sites last.
 		'''
 		cg_graph = self.mapping.cg_graph
 		positions = compute_bead_positions(cg_graph, self.mapping.aa_graph, self.coords,
 										   include_hydrogens=self.opts.hydrogens_in_bead_position)
 		itp_vs = self.topology.virtual_sites(cg_graph) if self.opts.indicate_vs and self.topology is not None else set()
-		hidden = set() if self.opts.show_vs else set(detect_virtual_nodes(cg_graph))
+		vs_colors = {vs: color for vs, color, _ in self._vs_constructions()} if self.opts.show_vs_construction else {}
 		drawn, seen_ids = [], set()
 		for node, position in positions.items():
-			if node in hidden:
-				continue
 			data = cg_graph.nodes[node]
 			name = data.get('n')
 			element_id = name if name is not None else data['fragname']
@@ -148,8 +146,9 @@ class Renderer:
 			drawn.append(DrawnBead(node, position, bead_type, name, element_id,
 								   color=bead_type.color_with(self.opts.bead_colors),
 								   base_radius=bead_type.radius_with(self.opts.bead_radii),
-								   dashed=node in itp_vs))
-		return positions, drawn, hidden
+								   dashed=node in itp_vs, border_color=vs_colors.get(node),
+									   border_alpha=1.0 if node in vs_colors else None))
+		return positions, drawn
 
 	def _bead_svg(self, bead):
 		'''SVG of a drawn bead: an outline along its drawn atoms (style='outline') or a circle.'''
@@ -157,32 +156,37 @@ class Renderer:
 		atoms = []
 		if opts.style == 'outline':
 			atoms = [atom for atom in self.mapping.cg_graph.nodes[bead.node]['graph'].nodes if atom in self.idx_map]
+		border_color = bead.border_color or opts.border_color
+		border_alpha = opts.border_alpha if bead.border_alpha is None else bead.border_alpha
 		if atoms: # beads without drawn atoms (e.g. virtual sites) are drawn as circles
 			atom_positions = {atom: list(self.coords(atom)) for atom in atoms}
 			bonds = list(self.mapping.aa_graph.subgraph(atoms).edges)
 			return svg.bead_outline(atom_positions, bonds, bead.color, bead.element_id,
 				opts.outline_width * opts.scale_factor, opts.border_width * opts.scale_factor,
-				opts.border_color, fill_alpha=opts.fill_alpha, border_alpha=opts.border_alpha)
+				border_color, fill_alpha=opts.fill_alpha, border_alpha=border_alpha)
 		return svg.bead_circle(bead.position, bead.base_radius, bead.color, bead.element_id, opts.scale_factor, dashed=bead.dashed,
-			border_width=opts.border_width, border_color=opts.border_color,
-			fill_alpha=opts.fill_alpha, border_alpha=opts.border_alpha)
+			border_width=opts.border_width, border_color=border_color,
+			fill_alpha=opts.fill_alpha, border_alpha=border_alpha)
 
 	def _mapping_svg(self):
 		'''SVG of the beads, the interactions of the loaded ITP and the bead labels.'''
 		opts = self.opts
-		positions, drawn, hidden = self._layout_beads()
+		positions, drawn = self._layout_beads()
+		self.element_ids = {bead.node: bead.element_id for bead in drawn}
 		beads = [self._bead_svg(bead) for bead in drawn]
 
-		below, above = [], [] # bonds and angles are drawn below the beads, dihedrals on top
+		below, above = [], [] # constructions, bonds and angles are drawn below the beads, dihedrals on top
+		if opts.show_vs_construction:
+			below += self._vs_construction_svg(positions)
 		if opts.show_bonds:
-			below += self._bonds_svg(positions, hidden)
-		angles, dihedrals = self._angles_dihedrals_svg(positions, hidden)
+			below += self._bonds_svg(positions)
+		angles, dihedrals = self._angles_dihedrals_svg(positions)
 		below += angles
 		above += dihedrals
 
 		labels = []
 		if opts.show_bead_labels:
-			anchors = self._label_anchors(drawn, positions, hidden)
+			anchors = self._label_anchors(drawn, positions)
 			for bead, (x, y) in zip(drawn, anchors):
 				width, ascent, descent = label_extent(bead.bead_type, bead.name, opts.scale_factor)
 				self.label_boxes.append((x, y - ascent, x + width, y + descent))
@@ -194,25 +198,79 @@ class Renderer:
 		return ''.join(below) + ''.join(beads) + ''.join(above) + ''.join(labels)
 
 	# interactions
-	def _interactions(self, interaction_type, hidden):
-		'''cg_graph nodes of the interactions of a type in the loaded ITP (none without ITP), see Topology.interactions.'''
+	def _highlighted(self):
+		'''cg_graph nodes of opts.highlight_beads (matched by bead name), None if not set.'''
+		names = self.opts.highlight_beads
+		if names is None:
+			return None
+		by_name = {data['atomname']: node for node, data in self.mapping.cg_graph.nodes(data=True)}
+		unknown = [name for name in names if name not in by_name]
+		if unknown:
+			raise ValueError(f"highlight_beads contains names that are not beads: {', '.join(map(str, unknown))}")
+		return {by_name[name] for name in names}
+
+	def _interactions(self, interaction_type):
+		'''
+		cg_graph nodes of the interactions of a type in the loaded ITP (none without ITP), see Topology.interactions.
+		With opts.highlight_beads only the interactions that include one of these beads.
+		'''
 		if self.topology is None:
 			return []
-		return self.topology.interactions(self.mapping.cg_graph, interaction_type, hidden)
+		highlighted = self._highlighted()
+		return [nodes for nodes in self.topology.interactions(self.mapping.cg_graph, interaction_type)
+				if highlighted is None or highlighted.intersection(nodes)]
 
-	def _bonds_svg(self, positions, hidden):
+	@staticmethod
+	def _colors(spec, palette, n):
+		'''n colors from spec: None (palette), a single color or a list of colors, cycled.'''
+		if isinstance(spec, str):
+			return [spec] * n
+		colors = list(palette if spec is None else spec)
+		return [colors[i % len(colors)] for i in range(n)]
+
+	def _vs_constructions(self):
+		'''
+		(virtual site, color, constructing beads) for each virtual site of the loaded ITP (none without ITP).
+		Colors are assigned to all virtual sites first, so opts.highlight_beads does not change them; with
+		highlight_beads only the virtual sites that are or are constructed from one of these beads are returned.
+		'''
+		if self.topology is None:
+			return []
+		constructions = self.topology.vs_constructions(self.mapping.cg_graph)
+		colors = self._colors(self.opts.vs_construction_colors, VS_PALETTE, len(constructions))
+		highlighted = self._highlighted()
+		return [(vs, color, parents) for (vs, parents), color in zip(constructions.items(), colors)
+				if highlighted is None or highlighted.intersection([vs, *parents])]
+
+	def _interaction_id(self, prefix, nodes):
+		'''id of an SVG element of an interaction: prefix and the element ids of its beads.'''
+		return '_'.join([prefix, *(self.element_ids[node] for node in nodes)])
+
+	def _vs_construction_svg(self, positions):
+		'''Dashed SVG lines from each virtual site of the loaded ITP to the beads it is constructed from.'''
+		opts = self.opts
+		width = opts.vs_construction_width * opts.scale_factor
+		dash = f'{3 * width:g},{2 * width:g}'
+		return [svg.line(positions[vs], positions[parent], color=color, width=width, dasharray=dash,
+						 element_id=self._interaction_id('vs', (vs, parent)))
+				for vs, color, parents in self._vs_constructions() for parent in parents]
+
+	def _bonds_svg(self, positions):
 		'''SVG lines for the bonds and constraints of the loaded ITP.'''
 		opts = self.opts
 		lines = []
-		for interaction_type, color in (('bonds', opts.bond_color), ('constraints', opts.constraint_color)):
-			for i, j in self._interactions(interaction_type, hidden):
-				lines.append(svg.line(positions[i], positions[j], color=color, width=opts.cg_line_width * opts.scale_factor))
+		for interaction_type, prefix, color in (('bonds', 'bond', opts.bond_color),
+												('constraints', 'constraint', opts.constraint_color)):
+			for i, j in self._interactions(interaction_type):
+				lines.append(svg.line(positions[i], positions[j], color=color, width=opts.cg_line_width * opts.scale_factor,
+									  element_id=self._interaction_id(prefix, (i, j))))
 		return lines
 
-	def _angles_dihedrals_svg(self, positions, hidden):
+	def _angles_dihedrals_svg(self, positions):
 		'''
 		SVG polylines for the angles and dihedrals (including impropers) of the loaded ITP, depending on
-		opts.show_angles and opts.show_dihedrals. Each one is drawn as a line along its bonds, shifted by
+		opts.show_angles and opts.show_dihedrals, each in its own color (opts.angle_colors, opts.dihedral_colors).
+		Each one is drawn as a line along its bonds, shifted by
 		opts.cg_line_offset away from the centroid of all beads. Where lines would overlap
 		on a bond, the offset of the later line is increased in steps of opts.line_spacing; angles are placed first.
 
@@ -226,7 +284,7 @@ class Renderer:
 		spacing = opts.line_spacing * opts.scale_factor
 		offset = opts.cg_line_offset * opts.scale_factor
 		occupied = {} # (bond, side) -> distances of the lines already placed along that bond on that side
-		def place(nodes, color):
+		def place(nodes, color, prefix):
 			points = [positions[n] for n in nodes]
 			side = offset_side(points, offset, centroid)
 			# side relative to each bond in a fixed direction (lower node first), so lines on different paths can be compared
@@ -237,17 +295,20 @@ class Renderer:
 				distance += spacing
 			for lane in lanes:
 				occupied.setdefault(lane, []).append(distance)
-			return svg.polyline(offset_path(points, distance, side), color=color, width=opts.cg_line_width * opts.scale_factor)
+			return svg.polyline(offset_path(points, distance, side), color=color, width=opts.cg_line_width * opts.scale_factor,
+								element_id=self._interaction_id(prefix, nodes))
 
-		angles, dihedrals = [], []
-		if opts.show_angles:
-			angles = [place(nodes, opts.angle_color) for nodes in self._interactions('angles', hidden)]
-		if opts.show_dihedrals:
-			dihedrals = [place(nodes, opts.dihedral_color) for nodes in self._interactions('dihedrals', hidden)]
+		def draw(interaction_type, prefix, colors, palette):
+			interactions = self._interactions(interaction_type)
+			return [place(nodes, color, prefix)
+					for nodes, color in zip(interactions, self._colors(colors, palette, len(interactions)))]
+
+		angles = draw('angles', 'angle', opts.angle_colors, ANGLE_PALETTE) if opts.show_angles else []
+		dihedrals = draw('dihedrals', 'dihedral', opts.dihedral_colors, DIHEDRAL_PALETTE) if opts.show_dihedrals else []
 		return angles, dihedrals
 
 	# labels
-	def _label_anchors(self, drawn, positions, hidden):
+	def _label_anchors(self, drawn, positions):
 		'''
 		Anchor (left end of the baseline of the last line) of the label of each drawn bead.
 		Labels of dummy beads are placed right above the bead; the others are placed by
@@ -256,16 +317,17 @@ class Renderer:
 		opts = self.opts
 		if opts.bead_label_position == 'optimize':
 			dummies = [i for i, bead in enumerate(drawn) if bead.bead_type.is_dummy]
-			return self._optimized_label_anchors(drawn, positions, hidden, fixed=dummies)
+			return self._optimized_label_anchors(drawn, positions, fixed=dummies)
 		return [label_above_bead(bead.position, bead.bead_type, bead.name, opts.scale_factor, radius=bead.base_radius)
 				if bead.bead_type.is_dummy
 				else tuple(opts.bead_label_position(bead.position, bead.radius(opts.scale_factor), bead.name))
 				for bead in drawn]
 
-	def _optimized_label_anchors(self, drawn, positions, hidden, fixed=()):
+	def _optimized_label_anchors(self, drawn, positions, fixed=()):
 		'''
 		Label anchors that minimize the overlap of the bead labels with each other, with the beads,
-		with the bonds and atom labels of the molecule and with the drawn bonds, angles and dihedrals.
+		with the bonds and atom labels of the molecule and with the drawn virtual site constructions, bonds, angles
+		and dihedrals.
 		The labels of the beads with the indices in fixed are placed right above the bead instead.
 		'''
 		opts, mol = self.opts, self.mol
@@ -277,8 +339,11 @@ class Renderer:
 				   if a.GetSymbol() != 'C' or opts.show_atom_indices]
 		segments = [(*atoms[i], *atoms[j], opts.bond_width * opts.scale_factor) for i, j in bonds]
 
-		# drawn bonds, angles and dihedrals as segments between the beads, as wide as the lines run next to them
+		# drawn constructions, bonds, angles and dihedrals as segments between the beads, as wide as the lines run next to them
 		cg_width = opts.cg_line_width * opts.scale_factor
+		if opts.show_vs_construction:
+			segments += [(*positions[vs], *positions[parent], opts.vs_construction_width * opts.scale_factor / 2)
+						 for vs, _, parents in self._vs_constructions() for parent in parents]
 		for option, interaction_types, width in (
 				('show_bonds', ('bonds', 'constraints'), cg_width / 2),
 				('show_angles', ('angles',), opts.cg_line_offset * opts.scale_factor + cg_width),
@@ -286,7 +351,7 @@ class Renderer:
 			if not getattr(opts, option):
 				continue
 			for interaction_type in interaction_types:
-				for nodes in self._interactions(interaction_type, hidden):
+				for nodes in self._interactions(interaction_type):
 					segments += [(*positions[a], *positions[b], abs(width)) for a, b in zip(nodes[:-1], nodes[1:])]
 
 		extents = [label_extent(bead.bead_type, bead.name, opts.scale_factor) for bead in drawn]

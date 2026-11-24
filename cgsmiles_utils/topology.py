@@ -137,27 +137,47 @@ class Topology:
 								"(the ITP charge is kept).")
 		return problems
 
+	def vs_constructions(self, cg_graph):
+		'''
+		The virtual sites of the ITP and the beads they are constructed from, as cg_graph nodes.
+		The virtual site is the first atom of each [ virtual_sites* ] entry, the constructing atoms follow.
+		virtual_sites1 entries are listed without constructing bead, since vermouth only keeps their first atom.
+
+		Returns
+		-------
+		dict
+			{virtual site: list of constructing beads}, in the order of the ITP.
+		'''
+		itp_to_cg = self.cg_node_map(cg_graph)
+		constructions = {}
+		for name, interactions in self.block.interactions.items():
+			if not name.startswith('virtual_sites'):
+				continue
+			for interaction in interactions:
+				site, *parents = (itp_to_cg[atom] for atom in interaction.atoms)
+				known = constructions.setdefault(site, [])
+				for parent in parents:
+					if parent not in known:
+						known.append(parent)
+		return constructions
+
 	def virtual_sites(self, cg_graph):
 		'''
 		The cg_graph nodes that are defined as virtual sites in the ITP.
 		'''
-		itp_to_cg = self.cg_node_map(cg_graph)
-		return {itp_to_cg[interaction.atoms[0]] # the virtual site is the first atom of each entry
-				for name, interactions in self.block.interactions.items() if name.startswith('virtual_sites')
-				for interaction in interactions}
+		return set(self.vs_constructions(cg_graph))
 
-	def interactions(self, cg_graph, interaction_type, hidden=()):
+	def interactions(self, cg_graph, interaction_type):
 		'''
-		Yield the cg_graph nodes of each interaction of the given type, skipping interactions that involve
-		hidden nodes. Interactions between the same beads (in the same or reversed order, e.g. multiple
-		dihedral terms) are only yielded once.
+		Yield the cg_graph nodes of each interaction of the given type. Interactions between the same beads
+		(in the same or reversed order, e.g. multiple dihedral terms) are only yielded once.
 		'''
 		itp_to_cg = self.cg_node_map(cg_graph)
 		seen = set()
 		for interaction in self.block.interactions.get(interaction_type, []):
 			nodes = [itp_to_cg[atom] for atom in interaction.atoms]
 			key = min(tuple(nodes), tuple(reversed(nodes)))
-			if key in seen or any(node in hidden for node in nodes):
+			if key in seen:
 				continue
 			seen.add(key)
 			yield nodes

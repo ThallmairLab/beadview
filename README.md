@@ -66,6 +66,8 @@ mapping.get_smiles()                              # 'CCCCCO'
 mapping = CGMapping(cgs_string)
 mapping.read_itp("molecule.itp")                  # first molecule type, or molname="..."
 mapping.show(show_bonds=True, show_angles=True, show_dihedrals=True)
+mapping.show(show_vs_construction=True)           # which beads construct each virtual site
+mapping.show(show_angles=True, highlight_beads=["R1"])  # only the angles that include R1
 
 mapping.change_bead_types({"R2": "TN1"})
 mapping.change_itp()                              # preview: {block node: 'changed from TC5 to TN1'}
@@ -140,13 +142,16 @@ Lengths are in pixels at `scale_factor=1`.
 | `bead_colors` | `None` | fill colors by bead type or chemical class, e.g. `{'TN1a': '#2ca02c', 'C': 'lightgray'}`; the type wins over the class |
 | `bead_radii` | `None` | circle radii by bead type or size, e.g. `{'T': 12, 'SP1': 22}`; the type wins over the size |
 | `include_hydrogens_in_bead_position` | `None` | `None` follows `show_hydrogens` |
-| `show_vs` | `True` | draw virtual sites |
 | `indicate_vs` | `True` | dashed outline for beads that are virtual sites in the loaded ITP |
 | `show_bead_labels` | `False` | bead type and name next to each bead |
 | `bead_type_label_color`, `bead_name_label_color` | `'#666666'`, `'#000000'` | label colors |
 | `bead_label_position` | `'optimize'` | `'optimize'` places labels with minimal overlap; or a function `(bead_position, bead_radius, bead_name) -> position` |
-| `show_bonds`, `show_angles`, `show_dihedrals` | `False` | interactions of the loaded ITP |
-| `bond_color`, `constraint_color`, `angle_color`, `dihedral_color` | | colors of the interaction lines |
+| `show_vs_construction` | `False` | dashed lines from each virtual site of the loaded ITP to the beads it is constructed from; the virtual site's border takes the same color, fully opaque |
+| `show_bonds`, `show_angles`, `show_dihedrals` | `False` | interactions of the loaded ITP (dihedrals: proper and improper) |
+| `highlight_beads` | `None` | bead names; only the interactions and constructions that include one of them are drawn |
+| `vs_construction_colors`, `angle_colors`, `dihedral_colors` | `None` | one color per virtual site, angle or dihedral: a list (cycled), a single color for all, or `None` for the default palette of each type |
+| `vs_construction_width` | `2.0` | width of the construction lines |
+| `bond_color`, `constraint_color` | `'#000000'`, `'#020070FF'` | colors of the bond and constraint lines |
 | `cg_line_width` | `2.0` | width of the interaction lines |
 | `cg_line_offset` | `8.0` | distance of angle/dihedral lines from the bonds they follow |
 | `line_spacing` | `4.0` | distance between overlapping angle/dihedral lines |

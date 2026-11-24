@@ -182,3 +182,23 @@ def test_check_ignores_bonds(azobenzene, tmp_path):
 		warnings.simplefilter('error', ITPConsistencyWarning)
 		CGMapping("{[#SC3;n=A][#SN4;n=B][#SP1;n=C]}.{#SC3=CC[$],#SN4=[$]CC[$],#SP1=[$]CO}").read_itp(itp)
 		azobenzene.read_itp(DATA / 'azobenzene.itp') # consistent test case
+
+
+def test_vs_constructions_follow_the_itp(azobenzene):
+	cg_graph = azobenzene.cg_graph
+	name = lambda node: cg_graph.nodes[node]['atomname']
+	constructions = azobenzene.topology.vs_constructions(cg_graph)
+	assert {name(vs): [name(parent) for parent in parents] for vs, parents in constructions.items()} == \
+		{'U4': ['R1', 'R2', 'R3'], 'U9': ['R6', 'R7', 'R8']}
+	assert azobenzene.topology.virtual_sites(cg_graph) == set(constructions)
+
+
+def test_vs_construction_drawn_from_itp_only(tmp_path):
+	# B is a virtual site of A in the ITP, but an ordinary bonded bead in the CGSmiles string
+	from cgsmiles_utils import CGMapping
+	itp = tmp_path / 'vs.itp'
+	itp.write_text(ATOMS + "[ virtual_sitesn ]\n2 1 1\n")
+	mapping = CGMapping("{[#SC3;n=A][#SN4;n=B]}.{#SC3=CC[$],#SN4=[$]CO}")
+	mapping.read_itp(itp)
+	svg = mapping.to_svg(show_vs_construction=True)
+	assert 'id="vs_B_A"' in svg and svg.count('id="vs_') == 1
