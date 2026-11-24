@@ -1,6 +1,6 @@
 '''
 GROMACS topologies (ITP files) of coarse-grained molecules and their link to the CG graph of a CGMapping.
-vermouth and fast_forward are only imported when an ITP is read or written.
+vermouth is only imported when an ITP is read or written.
 '''
 import copy
 from pathlib import Path
@@ -8,6 +8,35 @@ from pathlib import Path
 import numpy as np
 
 from .beads import BeadType
+
+
+def _read_itp(lines, ff):
+	'''
+	Parse ITP lines into the force field ff with vermouth's ITP parser, keeping the comment of each interaction line
+	(as fast_forward does), so that write() reproduces them.
+	'''
+	from vermouth.gmx.itp_read import ITPDirector
+	from vermouth.parser_utils import split_comments
+
+	class CommentKeepingParser(ITPDirector):
+		current_comment = ''
+
+		def parse(self, file_handle):
+			def remember_comments(lines):
+				for line in lines:
+					comment = split_comments(line, self.COMMENT_CHAR)[1]
+					if self.COMMENT_CHAR in comment: # only the first of several comments
+						comment = split_comments(comment, self.COMMENT_CHAR)[0]
+					self.current_comment = comment
+					yield line
+			return super().parse(remember_comments(file_handle))
+
+		def _base_parser(self, tokens, context, section, atom_idxs):
+			super()._base_parser(tokens, context, section, atom_idxs)
+			if self.current_comment:
+				context.interactions[section][-1].meta['comment'] = self.current_comment
+
+	return list(CommentKeepingParser(ff).parse(iter(lines)))
 
 
 class Topology:
@@ -35,12 +64,11 @@ class Topology:
 		'''
 		Read an ITP file. molname selects the molecule type, by default the first one in the file.
 		'''
-		from fast_forward.itp_parser_sub import read_itp
 		from vermouth.forcefield import ForceField
 		with open(path) as f:
 			lines = f.readlines()
 		ff = ForceField("dummy")
-		read_itp(lines, ff)
+		_read_itp(lines, ff)
 		if not ff.blocks:
 			raise ValueError(f"No molecule type found in {path}.")
 		return cls(ff, molname if molname is not None else next(iter(ff.blocks)))

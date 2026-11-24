@@ -1,0 +1,46 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cgsmiles-utils"
+dynamic = ["version"]
+description = "Drawing, structure generation and ITP editing for CGSmiles coarse-grained mappings"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE.txt"]
+authors = [{ name = "Thilo Duve", email = "thiloduve@web.de" }]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Operating System :: OS Independent",
+    "Topic :: Scientific/Engineering :: Chemistry",
+]
+dependencies = [
+    "cgsmiles>=1.0",
+    "pysmiles>=2.0",
+    "rdkit",
+    "numpy",
+    "networkx>=2.0",
+    "contourpy",
+]
+
+[project.optional-dependencies]
+# CGMapping.show() and show_default()
+show = ["matplotlib", "pillow", "cairosvg", "scipy"]
+# aa_structure() and cg_structure()
+structure = ["MDAnalysis"]
+# read_itp(), change_itp() and write_itp()
+itp = ["vermouth"]
+all = ["cgsmiles-utils[show,structure,itp]"]
+dev = ["cgsmiles-utils[all]", "pytest", "ipython"]
+# predict_pka() needs pkasolver, which is not on PyPI, see the README
+
+[tool.setuptools.dynamic]
+version = { attr = "cgsmiles_utils.__version__" }
+
+[tool.setuptools.packages.find]
+include = ["cgsmiles_utils*", "CGSmiles_utils"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

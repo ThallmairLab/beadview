@@ -65,6 +65,17 @@ def test_add_comments_without_bonds_section(tmp_path):
 	assert '1 SC1 1 ONE A 1 0 54 ; note' in itp.read_text()
 
 
+def test_interaction_comments_are_kept(tmp_path):
+	from cgsmiles_utils import CGMapping
+	mapping = CGMapping("{[#SC3;n=A][#SN4;n=B]}.{#SC3=CC[$],#SN4=[$]CO}")
+	itp = tmp_path / 'two.itp'
+	itp.write_text("[ moleculetype ]\nTWO 1\n[ atoms ]\n1 SC3 1 TWO A 1 0 54\n2 SN4 1 TWO B 2 0 54\n"
+				   "[ bonds ]\n1 2 1 0.4 5000 ; backbone ; second comment\n")
+	mapping.read_itp(itp)
+	assert mapping.topology.block.interactions['bonds'][0].meta['comment'].strip() == 'backbone'
+	assert 'backbone' in mapping.write_itp(tmp_path, 'out').read_text()
+
+
 def test_duplicate_bead_names_are_rejected(tmp_path):
 	from cgsmiles_utils import CGMapping
 	mapping = CGMapping("{[#SC3;n=A][#SN4;n=A]}.{#SC3=CC[$],#SN4=[$]CO}")

@@ -84,6 +84,7 @@ def test_get_smiles(simple):
 
 
 def test_predict_pka_restores_global_state(simple, monkeypatch):
+	pytest.importorskip('IPython')
 	from rdkit.Chem.Draw import IPythonConsole # imported before IPython.display is replaced below
 	# stand-ins for pkasolver and IPython, so the test neither needs them nor runs the model
 	fake_pkasolver = SimpleNamespace(calculate_microstate_pka_values=lambda mol: [],

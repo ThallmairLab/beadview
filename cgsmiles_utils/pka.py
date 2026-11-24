@@ -34,7 +34,8 @@ def predict_pka(aa_graph, show_protonation_reactions=False, show_protonation_map
 	try:
 		from pkasolver.query import draw_pka_map, draw_pka_reactions, calculate_microstate_pka_values
 	except ImportError:
-		raise ImportError("pKa prediction needs pkasolver, install it with 'pip install pkasolver'.") from None
+		raise ImportError("pKa prediction needs pkasolver, install it from https://github.com/mayrf/pkasolver "
+						  "(it is not on PyPI).") from None
 
 	mol, _ = cgsmiles_to_rdkit(aa_graph, add_hydrogens=False)
 	SanitizeMol(mol)
