@@ -1,3 +1,4 @@
+import copy
 from dataclasses import replace
 from pathlib import Path
 
@@ -147,6 +148,16 @@ class CGMapping:
 		self._set_string(new_string, new_graphs)
 		return self.cgs_string
 
+	def with_bead_types(self, bead_change):
+		'''
+		A new CGMapping with the types of some beads changed (see change_bead_types); this mapping is not changed.
+		The new mapping shares the loaded ITP, which is never modified, so it is read only once for a scan of
+		bead types.
+		'''
+		variant = copy.copy(self)
+		variant.change_bead_types(bead_change) # replaces the string and graphs of the copy only
+		return variant
+
 	def read_itp(self, path_in, molname=None):
 		'''Load an ITP file; molname selects the molecule type, by default the first one.'''
 		self.topology = Topology.from_itp(path_in, molname)
@@ -159,7 +170,8 @@ class CGMapping:
 
 	def change_itp(self):
 		'''
-		Update the loaded ITP to the bead types of the CGSmiles string (see Topology.apply_cg_types).
+		The changes write_itp() makes to the loaded ITP to match the bead types of the CGSmiles string
+		(see Topology.apply_cg_types). The loaded ITP is not modified.
 
 		Returns
 		-------
@@ -167,7 +179,7 @@ class CGMapping:
 			{ITP block node: comment describing the change}
 		'''
 		topology = self._require_topology()
-		return topology.apply_cg_types(topology.block, self.cg_graph)
+		return topology.apply_cg_types(copy.deepcopy(topology.block), self.cg_graph)
 
 	def write_itp(self, path_out, outname=None):
 		'''

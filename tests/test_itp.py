@@ -84,3 +84,22 @@ def test_duplicate_bead_names_are_rejected(tmp_path):
 	mapping.read_itp(itp)
 	with pytest.raises(ValueError, match='not unique'):
 		mapping.change_itp()
+
+
+def test_change_itp_does_not_modify_loaded_itp(azobenzene):
+	assert azobenzene.change_itp() == {1: 'changed from TN1 to TC5'}
+	assert azobenzene.topology.block.nodes[1]['atype'] == 'TN1'
+
+
+def test_with_bead_types_leaves_base_unchanged(azobenzene, tmp_path):
+	before = azobenzene.cgs_string
+	variant = azobenzene.with_bead_types({'N5': 'SN6a'})
+	assert azobenzene.cgs_string == before
+	def bead_type(mapping, name):
+		return next(d['atype'] for _, d in mapping.cg_graph.nodes(data=True) if d['atomname'] == name)
+	assert bead_type(azobenzene, 'N5') == 'TN1a' and bead_type(variant, 'N5') == 'SN6a'
+	assert variant.topology is azobenzene.topology # read once, shared
+	assert 'changed from TN1a to SN6a' in atom_lines(variant.write_itp(tmp_path, 'V1'))['N5']
+	assert 'SN6a' not in (azobenzene.write_itp(tmp_path, 'BASE')).read_text()
+	n5 = next(node for node, d in azobenzene.topology.block.nodes(data=True) if d['atomname'] == 'N5')
+	assert azobenzene.topology.block.nodes[n5]['atype'] == 'TN1a'
