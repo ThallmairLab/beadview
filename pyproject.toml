@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 license-files = ["LICENSE.txt"]
-authors = [{ name = "Thilo Duve", email = "thiloduve@web.de" }]
+authors = [{ name = "Thilo Duve", email = "duve@fias.uni-frankfurt.de" }]
 classifiers = [
     "Programming Language :: Python :: 3",
     "Operating System :: OS Independent",
@@ -24,6 +24,11 @@ dependencies = [
     "networkx>=2.0",
     "contourpy",
 ]
+
+[project.urls]
+Homepage = "https://github.com/ThallmairLab/beadview"
+Source = "https://github.com/ThallmairLab/beadview"
+Issues = "https://github.com/ThallmairLab/beadview/issues"
 
 [project.optional-dependencies]
 # CGMapping.show() and show_default()

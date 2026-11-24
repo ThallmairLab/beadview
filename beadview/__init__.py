@@ -7,6 +7,6 @@ from .drawing.options import DrawOptions
 from .mapping import CGMapping
 from .topology import ITPConsistencyWarning, Topology
 
-__version__ = '1.7.15'
+__version__ = '0.1.0'
 
 __all__ = ['CGMapping', 'DrawOptions', 'parallel_tails', 'BeadType', 'Topology', 'ITPConsistencyWarning', '__version__']
