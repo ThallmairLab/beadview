@@ -74,8 +74,8 @@ mapping.cg_structure("MOL.gro", resname="MOL")    # beads in the atom order of t
 ```
 
 ITP atoms are matched to beads by name (`n=`). `read_itp` warns (`ITPConsistencyWarning`) about bead names that are
-not unique or missing on one side, beads that are a virtual site only in the ITP or only in the string, and bead
-charges (`q=`) that differ from the ITP. Bonds and other interactions are not compared with the string.
+not unique or missing on one side and bead charges (`q=`) that differ from the ITP. Bonds, virtual sites and other
+interactions are not compared with the string.
 
 `write_itp` writes the bead types of the CGSmiles string, marks every changed atom with a comment and updates the
 mass when the bead size changes (T/S/R = 36/54/72) and the mass was the default one. Charges are not changed.

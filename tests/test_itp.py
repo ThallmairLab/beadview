@@ -156,11 +156,14 @@ def test_check_missing_beads(tmp_path):
 	assert any('Beads C of the CGSmiles string' in p for p in problems)
 
 
-def test_check_virtual_sites(tmp_path):
-	# B is a virtual site in the ITP but bonded in the string
-	itp = ATOMS + "[ virtual_sitesn ]\n2 1 1\n"
-	problems = check_problems("{[#SC3;n=A][#SN4;n=B]}.{#SC3=CC[$],#SN4=[$]CO}", itp, tmp_path)
-	assert problems == ['B is a virtual site in the ITP but bonded to other beads in the CGSmiles string.']
+def test_check_ignores_virtual_sites(tmp_path):
+	import warnings
+	from cgsmiles_utils import CGMapping
+	itp = tmp_path / 'vs.itp'
+	itp.write_text(ATOMS + "[ virtual_sitesn ]\n2 1 1\n") # B is a virtual site in the ITP but bonded in the string
+	with warnings.catch_warnings():
+		warnings.simplefilter('error', ITPConsistencyWarning)
+		CGMapping("{[#SC3;n=A][#SN4;n=B]}.{#SC3=CC[$],#SN4=[$]CO}").read_itp(itp)
 
 
 def test_check_charges(tmp_path):
