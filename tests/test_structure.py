@@ -85,3 +85,46 @@ def test_cg_structure_needs_all_beads_in_itp(tmp_path):
 		mapping.read_itp(itp)
 	with pytest.raises(ValueError, match='B are not in the loaded ITP'):
 		mapping.cg_structure(tmp_path / 'x_cg.gro', write_aa=False)
+
+
+@pytest.mark.parametrize('cgs, smiles, residues', [
+	('{[#X]}.{#X=[#A;n=A1][#B;n=B1]}.{#A=CC[$],#B=[$]CO}', 'CCCO', [('X', 1)] * 2),
+	('{[#R1][#R2]}.{#R1=[#A;n=A1][#B;n=B1][$],#R2=[$][#C;n=C1]}.{#A=CC[$],#B=[$]CC[$],#C=[$]CO}',
+	 'CCCCCO', [('R1', 1), ('R1', 1), ('R2', 2)]),
+	# the top level only groups the residues
+	('{[#M]}.{#M=[#R][#R]}.{#R=[$][#A;n=A1][#B;n=B1][$]}.{#A=[$]CC[$],#B=[$]CC[$]}',
+	 'CCCCCCCC', [('R', 1), ('R', 1), ('R', 2), ('R', 2)]),
+])
+def test_more_than_two_levels(cgs, smiles, residues):
+	mapping = CGMapping(cgs)
+	assert mapping.get_smiles() == smiles
+	assert [(d['resname'], d['resid']) for _, d in mapping.cg_graph.nodes(data=True)] == residues
+	assert '</svg>' in mapping.to_svg()
+
+
+def test_two_levels_have_no_residues(simple):
+	assert all('resid' not in d for _, d in simple.cg_graph.nodes(data=True))
+
+
+RESIDUES = ('{[#M]}.{#M=[#R][#Q]}.{#R=[$][#A;n=A1][#B;n=B2][$],#Q=[$][#C;n=A1]}'
+			'.{#A=[$]CC[$],#B=[$]CC[$],#C=[$]CO}')
+
+
+def test_cg_structure_with_residues(tmp_path):
+	CGMapping(RESIDUES).cg_structure(tmp_path / 'res_cg.pdb')
+	cg = mda.Universe(tmp_path / 'res_cg.pdb')
+	# sorted by the number in the bead names, but the beads of a residue stay together
+	assert list(cg.atoms.names) == ['A1', 'B2', 'A1']
+	assert list(cg.atoms.resnames) == ['R', 'R', 'Q']
+	assert list(cg.atoms.resids) == [1, 1, 2]
+	aa = mda.Universe(tmp_path / 'res_aa.pdb')
+	assert list(aa.residues.resnames) == ['R', 'Q']
+	assert [len(residue.atoms) for residue in aa.residues] == [13, 5] # C4H9 and CH2OH
+	assert sorted(aa.select_atoms('resname Q').elements) == ['C', 'H', 'H', 'H', 'O']
+
+
+def test_cg_structure_resname_replaces_residue_names(tmp_path):
+	CGMapping(RESIDUES).cg_structure(tmp_path / 'res_cg.pdb', resname='MOL', write_aa=False)
+	cg = mda.Universe(tmp_path / 'res_cg.pdb')
+	assert list(cg.atoms.resnames) == ['MOL'] * 3
+	assert list(cg.atoms.resids) == [1, 1, 2]

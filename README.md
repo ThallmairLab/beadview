@@ -7,6 +7,9 @@ Utilities for coarse-grained (Martini) mappings written as [CGSmiles](https://gi
 - **ITP editing**: write an ITP with the bead types of the string, with comments on every changed atom
 - **bead type changes** directly in the CGSmiles string
 
+Strings with more than two resolutions are resolved down to the atoms: the second-to-last resolution gives the beads,
+and the one above it their residues (`resname`, `resid` on the beads).
+
 ## Installation
 
 From a clone of this repository:

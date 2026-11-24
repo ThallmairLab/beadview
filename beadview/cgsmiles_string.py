@@ -35,7 +35,9 @@ def change_bead_types(cgs_string, bead_change):
 	Parameters
 	----------
 	cgs_string : str
-		CGSmiles string with two resolutions, {cg}.{fragments}.
+		CGSmiles string with two or more resolutions. The beads are in the second-to-last resolution, their
+		fragments in the last one. A bead inside a residue fragment (three or more resolutions) changes in
+		every copy of that residue.
 	bead_change : dict
 		{bead name: new bead type}
 
@@ -45,9 +47,10 @@ def change_bead_types(cgs_string, bead_change):
 		The new CGSmiles string.
 	'''
 	resolutions = re.split(r'\}\s*\.\s*\{', cgs_string.strip())
-	if len(resolutions) != 2 or not resolutions[0].startswith('{') or not resolutions[1].endswith('}'):
-		raise ValueError("change_bead_types only supports CGSmiles strings with two resolutions, {cg}.{fragments}.")
-	cg, fragments = resolutions[0][1:], resolutions[1][:-1]
+	if len(resolutions) < 2 or not resolutions[0].startswith('{') or not resolutions[-1].endswith('}'):
+		raise ValueError("change_bead_types needs a CGSmiles string with two or more resolutions, {cg}.{fragments}.")
+	resolutions[0], resolutions[-1] = resolutions[0][1:], resolutions[-1][:-1]
+	upper, cg, fragments = resolutions[:-2], resolutions[-2], resolutions[-1]
 	definitions = [part.strip() for part in split_top_level(fragments)]
 	fragment_bodies = {} # fragment name -> definition without '#name'
 	for definition in definitions:
@@ -93,7 +96,7 @@ def change_bead_types(cgs_string, bead_change):
 
 	for start, end, new_fragname in sorted(replacements, reverse=True):
 		cg = cg[:start] + new_fragname + cg[end:]
-	return f'{{{cg}}}.{{{",".join(new_definitions + definitions)}}}'
+	return '{' + '}.{'.join(upper + [cg, ','.join(new_definitions + definitions)]) + '}'
 
 
 def _bead_contents(cg_graph):

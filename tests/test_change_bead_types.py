@@ -84,3 +84,14 @@ def test_check_detects_changed_bonds(simple):
 	aa.edges[i, j]['order'] = 2
 	with pytest.raises(ValueError, match='different all-atom molecule'):
 		check_bead_type_change((simple.cg_graph, simple.aa_graph), (simple.cg_graph, aa), {})
+
+
+THREE_LEVELS = ('{[#R1][#R2]}.{#R1=[#A;n=A1][#B;n=B1][$],#R2=[$][#C;n=C1]}'
+				'.{#A=CC[$],#B=[$]CC[$],#C=[$]CO}')
+
+
+def test_three_levels():
+	mapping = CGMapping(THREE_LEVELS)
+	mapping.change_bead_types({'B1': 'SP1', 'C1': 'TC5'})
+	assert types(mapping) == {'A1': 'A', 'B1': 'SP1', 'C1': 'TC5'}
+	assert mapping.cgs_string.startswith('{[#R1][#R2]}.{#R1=[#A;n=A1][#SP1;n=B1][$],#R2=[$][#TC5;n=C1]}.')

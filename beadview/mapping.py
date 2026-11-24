@@ -19,7 +19,8 @@ UNSUPPORTED_IMAGE_FORMATS = {'.pdf', '.eps', '.ps', '.jpg', '.jpeg', '.tif', '.t
 
 class CGMapping:
 	'''
-	A coarse-grained mapping of a molecule, given as CGSmiles string with two resolutions.
+	A coarse-grained mapping of a molecule, given as CGSmiles string with two or more resolutions. The beads are the
+	second-to-last resolution, the atoms the last one.
 
 	Attributes
 	----------
@@ -38,8 +39,27 @@ class CGMapping:
 
 	@staticmethod
 	def _resolve(cgs_string):
-		'''(cg_graph, aa_graph) of a CGSmiles string, as resolved by cgsmiles.'''
-		return cgsmiles.MoleculeResolver.from_string(cgs_string).resolve()
+		'''
+		(cg_graph, aa_graph) of a CGSmiles string, resolved by cgsmiles down to the atoms.
+
+		The CG level is the second-to-last level, the atoms the last one. With three or more levels, the level
+		above the CG level holds the residues: its fragment name and position (counted from 1) become 'resname'
+		and 'resid' of the beads. Levels further up only group the residues.
+		'''
+		resolver = cgsmiles.MoleculeResolver.from_string(cgs_string, last_all_atom=True)
+		if resolver.resolutions < 1:
+			raise ValueError(f"The CGSmiles string needs at least two resolutions: {cgs_string}")
+		# each step resolves level k into level k+1, the last one the CG level into the atoms
+		metas = [meta for meta, _ in resolver.resolve_iter()]
+		cg_graph, aa_graph = resolver.meta_graph, resolver.molecule
+		if len(metas) > 1:
+			residues = metas[-2]
+			for node, data in residues.nodes(data=True):
+				# residue nodes are numbered in sequence order; their fragid is not unique on lower levels
+				for bead in data['graph'].nodes:
+					cg_graph.nodes[bead]['resname'] = data['fragname']
+					cg_graph.nodes[bead]['resid'] = node + 1
+		return cg_graph, aa_graph
 
 	def _set_string(self, cgs_string, graphs=None):
 		self.cgs_string = cgs_string
@@ -124,6 +144,10 @@ class CGMapping:
 		With a loaded ITP, the beads are written in the atom order of the ITP and resname defaults to its residue
 		name. Without, they are ordered by their index annotation (all beads need one), else by the number at the
 		end of their names (if all have one), else as in the CGSmiles string; resname defaults to the file name.
+
+		With three or more resolutions, the beads (and atoms) are written in the residues of the CGSmiles string,
+		named after their fragments and numbered from 1. Without ITP, the beads of each residue are kept together.
+		A given resname replaces the names of all residues.
 		'''
 		return structure.cg_structure(self, out_file, resname, write_aa, random_seed)
 
