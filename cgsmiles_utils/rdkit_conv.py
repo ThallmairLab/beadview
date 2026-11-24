@@ -67,10 +67,14 @@ def cgsmiles_to_rdkit(mol_graph, add_hydrogens=False):
 						  'Check your CGSmiles string.')
 			continue
 		bond.SetStereoAtoms(isomer[0], isomer[3])
+		# cis/trans refer to the stereo atoms (Z/E would refer to the CIP priorities of the substituents)
 		if isomer_type == 'cis':
-			bond.SetStereo(Chem.rdchem.BondStereo.STEREOZ)
+			bond.SetStereo(Chem.rdchem.BondStereo.STEREOCIS)
 		elif isomer_type == 'trans':
-			bond.SetStereo(Chem.rdchem.BondStereo.STEREOE)
+			bond.SetStereo(Chem.rdchem.BondStereo.STEREOTRANS)
 		else:
 			raise ValueError(f"Unsupported isomer type: {isomer[4]}")
+	if isomer_data:
+		# mark the stereo as perceived, else RDKit discards the double bond stereo set above (e.g. in MolToSmiles)
+		Chem.AssignStereochemistry(mol, cleanIt=False, force=True)
 	return mol, idx_mapping

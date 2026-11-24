@@ -103,6 +103,12 @@ def test_get_smiles(simple):
 	assert simple.get_smiles(add_hydrogens=True).count('[H]') == 12
 
 
+@pytest.mark.parametrize('smiles', ['CC/C=C\\CC', 'CC/C=C/CC', 'CC/C=C(\\Cl)CC', 'CC/C=C(/Cl)CC'])
+def test_get_smiles_keeps_double_bond_stereo(smiles):
+	from cgsmiles_utils import CGMapping
+	assert Chem.CanonSmiles(CGMapping(f'{{[#A]}}.{{#A={smiles}}}').get_smiles()) == Chem.CanonSmiles(smiles)
+
+
 def test_predict_pka_restores_global_state(simple, monkeypatch):
 	pytest.importorskip('IPython')
 	from rdkit.Chem.Draw import IPythonConsole # imported before IPython.display is replaced below
