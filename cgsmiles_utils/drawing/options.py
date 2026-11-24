@@ -16,6 +16,10 @@ class DrawOptions:
 	scale_factor: float = 1
 	rotate_by: float = 0 # rotation of the molecule in degrees
 	flip: bool = False # mirror the molecule horizontally
+	# fixed 2D coordinates of atoms, {aa_graph node: (x, y)} in RDKit units (bond length 1.5, y up), or a function
+	# aa_graph -> such a dict, e.g. parallel_tails(); RDKit lays out the other atoms around them. Applied before
+	# rotate_by and flip.
+	fixed_coords: dict | Callable | None = None
 	remove_background: bool = True # transparent instead of white background
 
 	# atomistic molecule

@@ -126,6 +126,7 @@ Lengths are in pixels at `scale_factor=1`.
 | `scale_factor` | `1` | scales the molecule and all lengths |
 | `rotate_by` | `0` | rotation in degrees |
 | `flip` | `False` | mirror horizontally |
+| `fixed_coords` | `None` | fixed 2D positions of atoms, `{aa_graph node: (x, y)}` in RDKit units (bond length 1.5), or a function `aa_graph -> dict` such as `parallel_tails()`; RDKit lays out the other atoms around them. Applied before `rotate_by` and `flip` |
 | `remove_background` | `True` | transparent background |
 | `show_hydrogens` | `False` | draw hydrogens |
 | `color_atoms` | `False` | color heteroatoms by element |
@@ -150,6 +151,20 @@ Lengths are in pixels at `scale_factor=1`.
 | `cg_line_offset` | `8.0` | distance of angle/dihedral lines from the bonds they follow |
 | `line_spacing` | `4.0` | distance between overlapping angle/dihedral lines |
 | `check_orientation` | `False` | report and highlight the most vertical bond |
+
+### Layout: straight, parallel tails
+
+By default RDKit chooses the 2D layout. `parallel_tails()` draws the tails of a molecule (unbranched carbon
+chains of at least `min_length=6` carbons ending in a CH3, plus the carbonyl or branching carbon they hang on) as
+straight zigzag chains pointing down, side by side `spacing=4.0` apart (RDKit units, bond length 1.5), in the order
+of the atoms in the CGSmiles string. Cis double bonds keep their geometry as a sideways step in the chain.
+
+```python
+from cgsmiles_utils import parallel_tails
+
+lipid.save("popc.svg", fixed_coords=parallel_tails())
+lipid.save("popc_h.svg", fixed_coords=parallel_tails(spacing=6), show_hydrogens=True, rotate_by=180)
+```
 
 ## Development
 

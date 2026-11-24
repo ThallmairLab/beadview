@@ -58,11 +58,25 @@ class Renderer:
 
 	def _build_mol(self):
 		mol, idx_map = cgsmiles_to_rdkit(self.mapping.aa_graph, add_hydrogens=self.opts.show_hydrogens)
-		rdDepictor.Compute2DCoords(mol)
+		rdDepictor.Compute2DCoords(mol, coordMap=self._coord_map(idx_map))
 		if self.opts.flip:
 			flip_molecule(mol)
 		rotate_molecule(mol, self.opts.rotate_by)
 		return mol, idx_map
+
+	def _coord_map(self, idx_map):
+		'''{RDKit atom index: Point2D} of the atoms fixed by opts.fixed_coords.'''
+		fixed = self.opts.fixed_coords
+		if fixed is None:
+			return {}
+		aa_graph = self.mapping.aa_graph
+		if callable(fixed):
+			fixed = fixed(aa_graph)
+		unknown = [node for node in fixed if node not in aa_graph]
+		if unknown:
+			raise ValueError(f"fixed_coords contains nodes that are not atoms of the aa_graph: {unknown}")
+		# hydrogens are not in the molecule when they are not drawn
+		return {idx_map[node]: Point2D(*map(float, xy)) for node, xy in fixed.items() if node in idx_map}
 
 	def _make_drawer(self):
 		opts = self.opts

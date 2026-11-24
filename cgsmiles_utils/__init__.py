@@ -2,10 +2,11 @@
 Utilities for CGSmiles mappings: drawing, structure generation, ITP editing and pKa prediction.
 '''
 from .beads import BeadType
+from .drawing.layout import parallel_tails
 from .drawing.options import DrawOptions
 from .mapping import CGMapping
 from .topology import ITPConsistencyWarning, Topology
 
 __version__ = '1.7.15'
 
-__all__ = ['CGMapping', 'DrawOptions', 'BeadType', 'Topology', 'ITPConsistencyWarning', '__version__']
+__all__ = ['CGMapping', 'DrawOptions', 'parallel_tails', 'BeadType', 'Topology', 'ITPConsistencyWarning', '__version__']
