@@ -30,7 +30,7 @@ The other features need these extras:
 cairosvg needs the system cairo library (`libcairo2` on Debian/Ubuntu, `cairo` with conda or Homebrew).
 `predict_pka()` needs [pkasolver](https://github.com/mayrf/pkasolver), which is not on PyPI; install it from its repository.
 
-The package was renamed from `CGSmiles_utils` to `cgsmiles_utils`. `import CGSmiles_utils` still works but raises a `DeprecationWarning`.
+The package was renamed from `CGSmiles_utils` to `cgsmiles_utils`; update old imports to `cgsmiles_utils`.
 
 ## Quick start
 

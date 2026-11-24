@@ -40,14 +40,6 @@ def test_show_after_rdkit_drawing_was_imported():
 	assert shape.strip() == '(300, 300, 4)'
 
 
-def test_old_package_name_still_works():
-	with pytest.warns(DeprecationWarning, match='cgsmiles_utils'):
-		sys.modules.pop('CGSmiles_utils', None)
-		import CGSmiles_utils
-	assert CGSmiles_utils.CGMapping is CGMapping
-	assert CGSmiles_utils.DrawOptions is cgsmiles_utils.DrawOptions
-
-
 def test_topology_from_itp():
 	topology = Topology.from_itp(DATA / 'azobenzene.itp')
 	assert topology.molname == 'AZB'

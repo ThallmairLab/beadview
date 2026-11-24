@@ -40,7 +40,7 @@ dev = ["cgsmiles-utils[all]", "pytest", "ipython"]
 version = { attr = "cgsmiles_utils.__version__" }
 
 [tool.setuptools.packages.find]
-include = ["cgsmiles_utils*", "CGSmiles_utils"]
+include = ["cgsmiles_utils*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
