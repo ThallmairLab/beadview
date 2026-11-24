@@ -73,6 +73,20 @@ class BeadType:
 		'''Default Martini 3 mass, None for dummy beads.'''
 		return MARTINI_MASSES.get(self.size)
 
+	def color_with(self, overrides=None) -> str:
+		'''Fill color, taken from overrides by bead type or chemical class if given there.'''
+		for key in (self.name, self.chemical_class):
+			if overrides and key in overrides:
+				return overrides[key]
+		return self.color
+
+	def radius_with(self, overrides=None) -> float:
+		'''Radius at scale_factor=1, taken from overrides by bead type or size if given there.'''
+		for key in (self.name, self.size):
+			if overrides and key in overrides:
+				return float(overrides[key])
+		return self.radius
+
 
 def detect_virtual_nodes(cg_graph):
 	'''

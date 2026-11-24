@@ -89,7 +89,7 @@ A bead connected to the rest of the molecule only by bonds of order 0 is a virtu
 placed at the weighted center of the atoms of its neighboring beads.
 
 Bead types follow Martini 3: an optional size letter (`T`, `S`, `R` = regular), the chemical class (`C`, `N`, `P`,
-`Q`, `X`, `D`; it sets the drawing color) and its level, e.g. `TC5`, `SN4a`, `P1`. `U` marks a dummy bead.
+`Q`, `X`, `D`; it sets the default drawing color) and its level, e.g. `TC5`, `SN4a`, `P1`. `U` marks a dummy bead.
 Several fragments of the same type are told apart by a trailing uppercase letter (`#TC5A`), which is stripped from
 the bead type.
 
@@ -100,7 +100,8 @@ Lengths are in pixels at `scale_factor=1`.
 
 | option | default | description |
 |--------|---------|-------------|
-| `canvas_size` | `(300, 300)` | size of the image |
+| `canvas_size` | `'auto'` | `'auto'` fits the image to the drawing; or a fixed `(width, height)`, e.g. to give several molecules the same scale |
+| `padding` | `10` | space around the drawing with `canvas_size='auto'` |
 | `scale_factor` | `1` | scales the molecule and all lengths |
 | `rotate_by` | `0` | rotation in degrees |
 | `flip` | `False` | mirror horizontally |
@@ -114,6 +115,8 @@ Lengths are in pixels at `scale_factor=1`.
 | `outline_width` | `12.0` | width of the outlines (`style='outline'`) |
 | `border_width`, `border_color`, `border_alpha` | `1.5`, `'#000000'`, `0.5` | bead borders |
 | `fill_alpha` | `0.5` | opacity of the bead filling |
+| `bead_colors` | `None` | fill colors by bead type or chemical class, e.g. `{'TN1a': '#2ca02c', 'C': 'lightgray'}`; the type wins over the class |
+| `bead_radii` | `None` | circle radii by bead type or size, e.g. `{'T': 12, 'SP1': 22}`; the type wins over the size |
 | `include_hydrogens_in_bead_position` | `None` | `None` follows `show_hydrogens` |
 | `show_vs` | `True` | draw virtual sites |
 | `indicate_vs` | `True` | dashed outline for beads that are virtual sites in the loaded ITP |

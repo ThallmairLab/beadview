@@ -37,12 +37,14 @@ def label_extent(bead_type, bead_name=None, scale_factor=1.0):
 	return width, above, below
 
 
-def label_above_bead(bead_position, bead_type, bead_name=None, scale_factor=1.0, gap=1.0):
+def label_above_bead(bead_position, bead_type, bead_name=None, scale_factor=1.0, gap=1.0, radius=None):
 	'''
 	Label anchor that centers the label horizontally on the bead with its baseline just above the top edge of the bead.
+	radius is the bead radius at scale_factor=1, by default the one of the bead type.
 	'''
 	width, _, _ = label_extent(bead_type, bead_name, scale_factor)
-	return (bead_position[0] - width / 2, bead_position[1] - bead_type.radius * scale_factor - gap * scale_factor)
+	radius = bead_type.radius if radius is None else radius
+	return (bead_position[0] - width / 2, bead_position[1] - radius * scale_factor - gap * scale_factor)
 
 
 def optimize_label_positions(bead_positions, bead_radii, label_sizes, circles, segments, canvas_size, gap,
@@ -69,8 +71,8 @@ def optimize_label_positions(bead_positions, bead_radii, label_sizes, circles, s
 		Circular obstacles (x, y, radius), e.g. atom labels.
 	segments : np.array, shape (S, 5)
 		Line obstacles (x1, y1, x2, y2, half width), e.g. bonds.
-	canvas_size : tuple
-		Width and height of the drawing; area outside is avoided.
+	canvas_size : tuple or None
+		Width and height of the drawing; area outside is avoided. None if the canvas is fitted to the drawing.
 	gap : float
 		Clearance kept between labels and their own bead and to all obstacles.
 	fixed_centers : dict, optional, default: None
@@ -129,8 +131,9 @@ def optimize_label_positions(bead_positions, bead_radii, label_sizes, circles, s
 		if len(segments):
 			d = point_segment_distances(points, segments[:, :4].reshape(-1, 2, 2))
 			cost += w_segment * fraction(np.any(d < segments[None, :, 4] + gap, axis=1))
-		outside = (points[:, 0] < 0) | (points[:, 1] < 0) | (points[:, 0] > canvas_size[0]) | (points[:, 1] > canvas_size[1])
-		cost += w_canvas * fraction(outside)
+		if canvas_size is not None:
+			outside = (points[:, 0] < 0) | (points[:, 1] < 0) | (points[:, 0] > canvas_size[0]) | (points[:, 1] > canvas_size[1])
+			cost += w_canvas * fraction(outside)
 		cost += w_ring * np.repeat(ring_steps, n_directions)
 		cost += w_direction * np.tile((1 - np.cos(angles - angles[0])) / 2, n_rings)
 		candidates.append(centers)

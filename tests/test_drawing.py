@@ -95,3 +95,76 @@ def test_predict_pka_restores_global_state(simple, monkeypatch):
 	simple.predict_pka()
 	assert logging.root.manager.disable == logging.NOTSET
 	assert IPythonConsole.molSize == size
+
+
+CHAIN = '{[#C1;n=A1][#C1;n=A2][#C1;n=A3][#C1;n=A4][#C1;n=A5][#C1;n=A6]}.{#C1=[$]CCCC[$]}'
+
+
+def view_box(svg):
+	import re
+	x, y, w, h = map(float, re.search(r"viewBox='([^']*)'", svg).group(1).split())
+	return x, y, x + w, y + h
+
+
+def test_auto_canvas_contains_all_beads_and_labels():
+	import re
+	from cgsmiles_utils import CGMapping
+	svg = CGMapping(CHAIN).to_svg(show_bead_labels=True, padding=0)
+	x0, y0, x1, y1 = view_box(svg)
+	circles = [(float(cx), float(cy), float(r)) for cx, cy, r in re.findall(r'cx="([^"]+)" cy="([^"]+)" r="([^"]+)"', svg)]
+	assert len(circles) == 12 # filling and border of 6 beads
+	assert all(x0 <= cx - r and cx + r <= x1 and y0 <= cy - r and cy + r <= y1 for cx, cy, r in circles)
+	assert all(x0 <= float(x) <= x1 for x in re.findall(r'<tspan x="([^"]+)"', svg))
+	assert x1 - x0 > 300 # wider than the old fixed canvas, which clipped this molecule
+
+
+def test_fixed_canvas_is_kept(simple):
+	svg = simple.to_svg(canvas_size=(300, 200))
+	assert "width='300px' height='200px' viewBox='0 0 300 200'" in svg
+
+
+def test_auto_canvas_padding_and_background(simple):
+	import re
+	tight, padded = view_box(simple.to_svg(padding=0)), view_box(simple.to_svg(padding=20))
+	assert padded[2] - padded[0] == pytest.approx(tight[2] - tight[0] + 40, abs=2)
+	svg = simple.to_svg(remove_background=False)
+	x0, y0, x1, y1 = view_box(svg)
+	rect = re.search(r"<rect[^>]*width='([^']*)' height='([^']*)' x='([^']*)' y='([^']*)'", svg).groups()
+	assert tuple(map(float, rect)) == (x1 - x0, y1 - y0, x0, y0)
+
+
+def test_invalid_canvas_size(simple):
+	with pytest.raises(ValueError, match='canvas_size'):
+		simple.to_svg(canvas_size='big')
+
+
+def test_content_bbox_path_commands():
+	from cgsmiles_utils.drawing.svg import content_bbox
+	svg = ("<path d='M 10,20 H 50 V 70 A 5 5 0 0 1 -5,30 Q 12 13, 14 15' />"
+		   '<circle cx="100" cy="100" r="10" /><line x1="0" y1="0" x2="1" y2="200" />'
+		   "<rect width='999' height='999' x='-500' y='-500'> </rect>")
+	assert content_bbox(svg) == (-5, 0, 110, 200)
+	assert content_bbox(svg, extra_boxes=[(-20, 5, 0, 5)]) == (-20, 0, 110, 200)
+
+
+def test_bead_colors_by_type_and_class(simple):
+	svg = simple.to_svg(bead_colors={'C': '#00ff00', 'SP1': '#123456', 'N': '#abcdef'})
+	assert 'fill:#00ff00' in svg # SC3 by class C
+	assert 'fill:#abcdef' in svg # SN4 by class N
+	assert 'fill:#123456' in svg # SP1 by type, before class P
+	assert 'fill:#ff0000' not in svg # default color of class P not used
+
+
+def test_bead_radii_by_type_and_size(simple):
+	import re
+	svg = simple.to_svg(bead_radii={'S': 10, 'SN4': 30}, canvas_size=(300, 300))
+	radii = sorted({float(r) for r in re.findall(r'stroke-dasharray:none" cx="[^"]+" cy="[^"]+" r="([^"]+)"', svg)})
+	assert radii == [10.0, 30.0]
+
+
+def test_custom_radius_moves_dummy_label():
+	from cgsmiles_utils.beads import BeadType
+	from cgsmiles_utils.drawing.labels import label_above_bead
+	dummy = BeadType('U')
+	assert label_above_bead((0, 0), dummy, 'U1', radius=20)[1] == pytest.approx(-21)
+	assert label_above_bead((0, 0), dummy, 'U1')[1] == pytest.approx(-dummy.radius - 1)

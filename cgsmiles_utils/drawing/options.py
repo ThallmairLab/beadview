@@ -11,7 +11,8 @@ class DrawOptions:
 	Options for drawing a CGMapping. Lengths are in pixels at scale_factor=1 and are multiplied by scale_factor.
 	"""
 	# canvas
-	canvas_size: tuple = (300, 300)
+	canvas_size: tuple | str = 'auto' # (width, height) in pixels, or 'auto' to fit the canvas to the drawing
+	padding: float = 10.0 # space around the drawing with canvas_size='auto'
 	scale_factor: float = 1
 	rotate_by: float = 0 # rotation of the molecule in degrees
 	flip: bool = False # mirror the molecule horizontally
@@ -31,6 +32,10 @@ class DrawOptions:
 	border_color: str = '#000000'
 	border_alpha: float = 0.5 # opacity of the bead borders
 	fill_alpha: float = 0.5 # opacity of the bead filling
+	# fill colors by bead type (e.g. 'TN1a') or chemical class (e.g. 'N'), overriding the defaults
+	bead_colors: dict | None = None
+	# circle radii at scale_factor=1 by bead type (e.g. 'TN1a') or size ('T', 'S', 'R', 'U'), overriding the defaults
+	bead_radii: dict | None = None
 	include_hydrogens_in_bead_position: bool | None = None # None follows show_hydrogens
 	show_vs: bool = True # draw virtual sites
 	indicate_vs: bool = True # dashed outline for beads that are virtual sites in the ITP loaded with read_itp()
@@ -59,6 +64,8 @@ class DrawOptions:
 	check_orientation: bool = False # report (and highlight in red) the most vertical bond of the molecule
 
 	def __post_init__(self):
+		if self.canvas_size != 'auto' and (isinstance(self.canvas_size, str) or len(self.canvas_size) != 2):
+			raise ValueError(f"canvas_size must be (width, height) or 'auto', got {self.canvas_size!r}")
 		if self.style not in ('beads', 'outline'):
 			raise ValueError(f"style must be 'beads' or 'outline', got '{self.style}'")
 		for option in ('fill_alpha', 'border_alpha'):

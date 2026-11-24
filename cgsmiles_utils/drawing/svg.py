@@ -1,6 +1,8 @@
 '''
-SVG elements for beads, interactions and labels.
+SVG elements for beads, interactions and labels, and fitting the canvas to the drawing.
 '''
+import math
+import re
 from xml.sax.saxutils import escape, quoteattr
 
 import numpy as np
@@ -14,7 +16,7 @@ def svg_id(prefix, name):
 	return f' id={quoteattr(f"{prefix}_{name}")}'
 
 
-def bead_circle(bead_position, bead_type, element_id, scale_factor, dashed=False, border_width=1.75, border_color='#6e6e6e',
+def bead_circle(bead_position, radius, color, element_id, scale_factor, dashed=False, border_width=1.75, border_color='#6e6e6e',
 				fill_alpha=0.5, border_alpha=0.5):
 	'''
 	SVG element for a bead drawn as a circle.
@@ -23,8 +25,10 @@ def bead_circle(bead_position, bead_type, element_id, scale_factor, dashed=False
 	----------
 	bead_position : list or np.array
 		The (x, y) position of the bead.
-	bead_type : BeadType
-		The type of the bead, determines size and color.
+	radius : float
+		Radius of the circle at scale_factor=1.
+	color : str
+		Fill color.
 	element_id : str
 		Unique name of the bead, used in the id of the SVG element.
 	dashed : bool
@@ -43,11 +47,11 @@ def bead_circle(bead_position, bead_type, element_id, scale_factor, dashed=False
 	'''
 	dasharray = f'{2.5 * scale_factor},{1.75 * scale_factor}' if dashed else 'none'
 	x, y = bead_position[0], bead_position[1]
-	r = bead_type.radius * scale_factor
+	r = radius * scale_factor
 	border_width = border_width * scale_factor
 	# the filling ends where the border starts, so the two do not overlap
 	svg = [f'<g{svg_id("circle_bead", element_id)}>\n']
-	svg.append(f'\t<circle style="fill:{bead_type.color};fill-opacity:{fill_alpha};stroke:none" cx="{x}" cy="{y}" r="{max(r - border_width / 2, 0)}" />\n')
+	svg.append(f'\t<circle style="fill:{color};fill-opacity:{fill_alpha};stroke:none" cx="{x}" cy="{y}" r="{max(r - border_width / 2, 0)}" />\n')
 	svg.append(f'\t<circle style="fill:none;stroke:{border_color};stroke-opacity:{border_alpha};stroke-width:{border_width};stroke-dasharray:{dasharray}" cx="{x}" cy="{y}" r="{r}" />\n')
 	svg.append('</g>\n')
 	return ''.join(svg)
@@ -62,7 +66,7 @@ def _contour_path(x, y, distance, level):
 	return ' '.join('M ' + ' L '.join(f'{px:.2f},{py:.2f}' for px, py in line) + ' Z' for line in lines if len(line) > 2)
 
 
-def bead_outline(atom_positions, bonds, bead_type, element_id, width, border_width, border_color='#000000',
+def bead_outline(atom_positions, bonds, color, element_id, width, border_width, border_color='#000000',
 				 fill_alpha=0.5, border_alpha=0.5):
 	'''
 	SVG element for a bead drawn as a rounded outline along the bonds between its atoms.
@@ -76,8 +80,8 @@ def bead_outline(atom_positions, bonds, bead_type, element_id, width, border_wid
 		Drawing coordinates (x, y) of the atoms of the bead, keyed by atom.
 	bonds : list of tuple
 		Pairs of atoms (keys of atom_positions) that are bonded.
-	bead_type : BeadType
-		The type of the bead, determines the color.
+	color : str
+		Fill color.
 	element_id : str
 		Unique name of the bead, used in the id of the SVG element.
 	width : float
@@ -106,7 +110,7 @@ def bead_outline(atom_positions, bonds, bead_type, element_id, width, border_wid
 	distance = distance_to_skeleton(x, y, segments, points)
 	inner_path = _contour_path(x, y, distance, inner)
 	svg = [f'<g{svg_id("outline_bead", element_id)}>\n']
-	svg.append(f'\t<path style="fill:{bead_type.color};fill-opacity:{fill_alpha};fill-rule:evenodd;stroke:none" d="{inner_path}" />\n')
+	svg.append(f'\t<path style="fill:{color};fill-opacity:{fill_alpha};fill-rule:evenodd;stroke:none" d="{inner_path}" />\n')
 	if border_width > 0:
 		ring_path = _contour_path(x, y, distance, outer) + ' ' + inner_path
 		svg.append(f'\t<path style="fill:{border_color};fill-opacity:{border_alpha};fill-rule:evenodd;stroke:none" d="{ring_path}" />\n')
@@ -175,3 +179,76 @@ def bead_label(anchor, bead_type, element_id, bead_name=None, scale_factor=1.0, 
 		text_svg.append(f'\t<tspan x="{x}" y="{line_y}" font-size="{fontsize}px" fill="{color}" font-family="sans-serif">{escape(text)}</tspan>\n')
 	text_svg.append('</text>\n')
 	return ''.join(text_svg)
+
+
+_SHAPE = re.compile(r'<(path|circle|ellipse|line|polyline)\b[^>]*>')
+_NUMBER = r'-?(?:\d+\.?\d*|\.\d+)(?:[eE][-+]?\d+)?'
+
+
+def _attribute(tag, name):
+	match = re.search(rf'\s{name}\s*=\s*([\'"])(.*?)\1', tag, re.S)
+	return match.group(2) if match else None
+
+
+def _path_points(d):
+	'''Points of SVG path data with absolute commands (M, L, Q, C, S, T, H, V, A, Z), as RDKit and this package write them.'''
+	points, x, y = [], 0.0, 0.0
+	for command, args in re.findall(r'([A-Za-z])([^A-Za-z]*)', d):
+		numbers = [float(n) for n in re.findall(_NUMBER, args)]
+		if command == 'H':
+			points += [(n, y) for n in numbers]
+		elif command == 'V':
+			points += [(x, n) for n in numbers]
+		elif command == 'A': # rx ry rotation large-arc sweep x y
+			points += [(numbers[i + 5], numbers[i + 6]) for i in range(0, len(numbers) - 6, 7)]
+		else:
+			points += list(zip(numbers[0::2], numbers[1::2]))
+		if points:
+			x, y = points[-1]
+	return points
+
+
+def content_bbox(svg_text, extra_boxes=()):
+	'''
+	Bounding box (x_min, y_min, x_max, y_max) of the shapes (path, circle, ellipse, line, polyline) of an SVG
+	and of extra_boxes (e.g. text). The background rectangle and stroke widths are not included.
+	'''
+	boxes = list(extra_boxes)
+	for match in _SHAPE.finditer(svg_text):
+		kind, tag = match.group(1), match.group(0)
+		if kind == 'path':
+			points = _path_points(_attribute(tag, 'd') or '')
+		elif kind == 'polyline':
+			numbers = [float(n) for n in re.findall(_NUMBER, _attribute(tag, 'points') or '')]
+			points = list(zip(numbers[0::2], numbers[1::2]))
+		elif kind == 'line':
+			points = [(float(_attribute(tag, 'x1')), float(_attribute(tag, 'y1'))),
+					  (float(_attribute(tag, 'x2')), float(_attribute(tag, 'y2')))]
+		else:
+			cx, cy = float(_attribute(tag, 'cx')), float(_attribute(tag, 'cy'))
+			rx = float(_attribute(tag, 'r') or _attribute(tag, 'rx'))
+			ry = float(_attribute(tag, 'r') or _attribute(tag, 'ry'))
+			points = [(cx - rx, cy - ry), (cx + rx, cy + ry)]
+		if points:
+			xs, ys = zip(*points)
+			boxes.append((min(xs), min(ys), max(xs), max(ys)))
+	if not boxes:
+		return None
+	x_min, y_min, x_max, y_max = zip(*boxes)
+	return min(x_min), min(y_min), max(x_max), max(y_max)
+
+
+def fit_canvas(svg_text, extra_boxes=(), padding=10.0):
+	'''
+	Resize the canvas of an SVG written by RDKit to the bounding box of its content (see content_bbox) plus padding,
+	by setting width, height and viewBox and moving the background rectangle (if any).
+	'''
+	box = content_bbox(svg_text, extra_boxes)
+	if box is None:
+		return svg_text
+	x0, y0 = math.floor(box[0] - padding), math.floor(box[1] - padding)
+	width, height = math.ceil(box[2] + padding) - x0, math.ceil(box[3] + padding) - y0
+	svg_text = re.sub(r"width='[^']*' height='[^']*' viewBox='[^']*'",
+					  f"width='{width}px' height='{height}px' viewBox='{x0} {y0} {width} {height}'", svg_text, count=1)
+	return re.sub(r"(<rect\b[^>]*?)width='[^']*' height='[^']*' x='[^']*' y='[^']*'",
+				  rf"\g<1>width='{width}' height='{height}' x='{x0}' y='{y0}'", svg_text, count=1)

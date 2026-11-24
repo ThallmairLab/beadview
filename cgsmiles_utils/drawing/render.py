@@ -17,6 +17,8 @@ from .geometry import flip_molecule, rotate_molecule, most_vertical_bonds, offse
 from .labels import label_extent, label_above_bead, optimize_label_positions
 from .options import REFERENCE_SCALE
 
+INITIAL_CANVAS = (300, 300) # canvas the molecule is drawn on with canvas_size='auto', before it is fitted
+
 
 @dataclass
 class DrawnBead:
@@ -26,10 +28,12 @@ class DrawnBead:
 	bead_type: BeadType
 	name: str | None
 	element_id: str # unique name used in the ids of the SVG elements
+	color: str # fill color
+	base_radius: float # radius at scale_factor=1
 	dashed: bool = False # virtual site in the loaded ITP
 
 	def radius(self, scale_factor):
-		return self.bead_type.radius * scale_factor
+		return self.base_radius * scale_factor
 
 
 class Renderer:
@@ -39,6 +43,8 @@ class Renderer:
 	def __init__(self, mapping, opts):
 		self.mapping = mapping
 		self.opts = opts
+		self.auto_canvas = opts.canvas_size == 'auto'
+		self.label_boxes = [] # (x_min, y_min, x_max, y_max) of the drawn bead labels, for fitting the canvas
 		self.mol, self.idx_map = self._build_mol()
 		self.drawer = self._make_drawer()
 
@@ -60,7 +66,8 @@ class Renderer:
 
 	def _make_drawer(self):
 		opts = self.opts
-		drawer = rdMolDraw2D.MolDraw2DSVG(*opts.canvas_size)
+		# with canvas_size='auto' the canvas is fitted to the drawing afterwards; RDKit does not clip what lies outside
+		drawer = rdMolDraw2D.MolDraw2DSVG(*(INITIAL_CANVAS if self.auto_canvas else opts.canvas_size))
 		# SetScale only takes integer sizes, so scale factors are effectively rounded to multiples of 1/REFERENCE_SCALE
 		size = max(int(round(opts.scale_factor * REFERENCE_SCALE)), 1)
 		drawer.SetScale(size, size, Point2D(1000, 1000), Point2D(-1000, -1000))
@@ -90,6 +97,8 @@ class Renderer:
 		text = self.drawer.GetDrawingText()
 		if opts.show_mapping:
 			text = text.replace('</svg>', self._mapping_svg() + '</svg>')
+		if self.auto_canvas:
+			text = svg.fit_canvas(text, self.label_boxes, opts.padding * opts.scale_factor)
 		return text
 
 	# beads
@@ -121,7 +130,11 @@ class Renderer:
 			if element_id in seen_ids: # unnamed beads of the same type or duplicate names
 				element_id = f'{element_id}_{node}'
 			seen_ids.add(element_id)
-			drawn.append(DrawnBead(node, position, BeadType(data['fragname']), name, element_id, dashed=node in itp_vs))
+			bead_type = BeadType(data['fragname'])
+			drawn.append(DrawnBead(node, position, bead_type, name, element_id,
+								   color=bead_type.color_with(self.opts.bead_colors),
+								   base_radius=bead_type.radius_with(self.opts.bead_radii),
+								   dashed=node in itp_vs))
 		return positions, drawn, hidden
 
 	def _bead_svg(self, bead):
@@ -133,10 +146,10 @@ class Renderer:
 		if atoms: # beads without drawn atoms (e.g. virtual sites) are drawn as circles
 			atom_positions = {atom: list(self.coords(atom)) for atom in atoms}
 			bonds = list(self.mapping.aa_graph.subgraph(atoms).edges)
-			return svg.bead_outline(atom_positions, bonds, bead.bead_type, bead.element_id,
+			return svg.bead_outline(atom_positions, bonds, bead.color, bead.element_id,
 				opts.outline_width * opts.scale_factor, opts.border_width * opts.scale_factor,
 				opts.border_color, fill_alpha=opts.fill_alpha, border_alpha=opts.border_alpha)
-		return svg.bead_circle(bead.position, bead.bead_type, bead.element_id, opts.scale_factor, dashed=bead.dashed,
+		return svg.bead_circle(bead.position, bead.base_radius, bead.color, bead.element_id, opts.scale_factor, dashed=bead.dashed,
 			border_width=opts.border_width, border_color=opts.border_color,
 			fill_alpha=opts.fill_alpha, border_alpha=opts.border_alpha)
 
@@ -156,6 +169,9 @@ class Renderer:
 		labels = []
 		if opts.show_bead_labels:
 			anchors = self._label_anchors(drawn, positions, hidden)
+			for bead, (x, y) in zip(drawn, anchors):
+				width, ascent, descent = label_extent(bead.bead_type, bead.name, opts.scale_factor)
+				self.label_boxes.append((x, y - ascent, x + width, y + descent))
 			labels = [svg.bead_label(anchor, bead.bead_type, bead.element_id, bead_name=bead.name,
 									 scale_factor=opts.scale_factor,
 									 type_color=opts.bead_type_label_color,
@@ -227,7 +243,8 @@ class Renderer:
 		if opts.bead_label_position == 'optimize':
 			dummies = [i for i, bead in enumerate(drawn) if bead.bead_type.is_dummy]
 			return self._optimized_label_anchors(drawn, positions, hidden, fixed=dummies)
-		return [label_above_bead(bead.position, bead.bead_type, bead.name, opts.scale_factor) if bead.bead_type.is_dummy
+		return [label_above_bead(bead.position, bead.bead_type, bead.name, opts.scale_factor, radius=bead.base_radius)
+				if bead.bead_type.is_dummy
 				else tuple(opts.bead_label_position(bead.position, bead.radius(opts.scale_factor), bead.name))
 				for bead in drawn]
 
@@ -261,7 +278,8 @@ class Renderer:
 		extents = [label_extent(bead.bead_type, bead.name, opts.scale_factor) for bead in drawn]
 		fixed_centers = {}
 		for i in fixed:
-			x, y = label_above_bead(drawn[i].position, drawn[i].bead_type, drawn[i].name, opts.scale_factor)
+			x, y = label_above_bead(drawn[i].position, drawn[i].bead_type, drawn[i].name, opts.scale_factor,
+									radius=drawn[i].base_radius)
 			width, above, below = extents[i]
 			fixed_centers[i] = (x + width / 2, y - (above - below) / 2)
 		centers = optimize_label_positions(
@@ -270,7 +288,7 @@ class Renderer:
 			label_sizes=[(width, above + below) for width, above, below in extents],
 			circles=circles,
 			segments=segments,
-			canvas_size=opts.canvas_size,
+			canvas_size=None if self.auto_canvas else opts.canvas_size,
 			gap=2 * opts.scale_factor,
 			fixed_centers=fixed_centers)
 		# convert label centers to text anchors (left end of the baseline of the last line)

@@ -35,7 +35,7 @@ def test_drawing_does_not_load_optional_dependencies():
 def test_show_outside_notebook_uses_matplotlib():
 	# RDKit's drawing code is imported first: with cairosvg this order crashed show()
 	shape = run_python("import matplotlib; matplotlib.use('Agg'); from rdkit.Chem import Draw; import IPython; "
-					   f"from cgsmiles_utils import CGMapping; ax = CGMapping({SIMPLE!r}).show(); "
+					   f"from cgsmiles_utils import CGMapping; ax = CGMapping({SIMPLE!r}).show(canvas_size=(300, 300)); "
 					   "print(ax.images[0].get_array().shape)")
 	assert shape.strip() == '(900, 900, 4)' # PNG at 3x the canvas size
 
