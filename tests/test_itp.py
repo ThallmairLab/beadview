@@ -103,3 +103,33 @@ def test_with_bead_types_leaves_base_unchanged(azobenzene, tmp_path):
 	assert 'SN6a' not in (azobenzene.write_itp(tmp_path, 'BASE')).read_text()
 	n5 = next(node for node, d in azobenzene.topology.block.nodes(data=True) if d['atomname'] == 'N5')
 	assert azobenzene.topology.block.nodes[n5]['atype'] == 'TN1a'
+
+
+def moleculetype(path):
+	'''Name of the first molecule type in an ITP file.'''
+	lines = [line.split() for line in open(path) if line.strip() and not line.lstrip().startswith(';')]
+	return next(lines[i + 1][0] for i, line in enumerate(lines) if line[:3] == ['[', 'moleculetype', ']'])
+
+
+def test_write_itp_to_file_renames_molecule_and_residue(azobenzene, tmp_path):
+	path = azobenzene.write_itp(tmp_path / 'V1.itp')
+	assert path == tmp_path / 'V1.itp'
+	assert moleculetype(path) == 'V1'
+	assert {line.split()[3] for line in atom_lines(path).values()} == {'V1'}
+
+
+def test_write_itp_keeps_name_without_rename(azobenzene, tmp_path):
+	path = azobenzene.write_itp(tmp_path)
+	assert path == tmp_path / 'AZB.itp' and moleculetype(path) == 'AZB'
+	assert {line.split()[3] for line in atom_lines(path).values()} == {'AZB'}
+
+
+def test_write_itp_keeps_other_residue_names(tmp_path):
+	from cgsmiles_utils import CGMapping
+	mapping = CGMapping("{[#SC3;n=A][#SN4;n=B]}.{#SC3=CC[$],#SN4=[$]CO}")
+	itp = tmp_path / 'two.itp'
+	itp.write_text("[ moleculetype ]\nTWO 1\n[ atoms ]\n1 SC3 1 RA A 1 0 54\n2 SN4 2 RB B 2 0 54\n")
+	mapping.read_itp(itp)
+	path = mapping.write_itp(tmp_path / 'NEW.itp')
+	assert moleculetype(path) == 'NEW'
+	assert [line.split()[3] for line in atom_lines(path).values()] == ['RA', 'RB']

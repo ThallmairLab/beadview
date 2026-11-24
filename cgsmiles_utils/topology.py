@@ -151,17 +151,31 @@ class Topology:
 
 	def write(self, path_out, cg_graph, outname=None, cgsmiles_string=None):
 		'''
-		Write the molecule type with the bead types of cg_graph to <path_out>/<outname>.itp.
-		Changed atoms are commented. The topology itself is not modified.
+		Write the molecule type with the bead types of cg_graph. Changed atoms are commented.
+		The topology itself is not modified.
+
+		path_out is either the ITP file (ending in .itp; outname defaults to its stem) or a directory, which gets
+		<outname>.itp (outname defaults to the molecule type). outname is the name of the written molecule type;
+		if it differs from the molecule type and all atoms have the molecule type as residue name, the residue
+		name is changed to outname as well.
 
 		Returns
 		-------
 		Path
 			The written file.
 		'''
+		path_out = Path(path_out)
+		if path_out.suffix == '.itp':
+			outname = outname or path_out.stem
+		else:
+			outname = outname or self.molname
+			path_out = path_out / f'{outname}.itp'
 		block = copy.deepcopy(self.block)
 		comments = self.apply_cg_types(block, cg_graph)
-		path = itp_writer(outname or self.molname, block, cgsmiles_string, path_out)
+		if outname != self.molname and all(d.get('resname') == self.molname for _, d in block.nodes(data=True)):
+			for _, d in block.nodes(data=True):
+				d['resname'] = outname
+		path = itp_writer(outname, block, cgsmiles_string, path_out)
 		# the atoms are numbered in the ITP in the order of the block, starting at 1
 		itp_index = {node: i for i, node in enumerate(block.nodes, start=1)}
 		add_comments_itp({itp_index[node]: comment for node, comment in comments.items()}, path)
@@ -170,18 +184,18 @@ class Topology:
 
 def itp_writer(molname, block, cgsmiles_string=None, out_path='.'):
 	'''
-	Write a block as ITP file <out_path>/<molname>.itp (adapted from fast_forward).
+	Write a block as ITP file (adapted from fast_forward).
 
 	Parameters
 	----------
 	molname : str
-		Name of the molecule type, also used as file name.
+		Name of the molecule type.
 	block : vermouth.molecule.Block
 		The block to write.
 	cgsmiles_string : str, optional
 		CGSmiles string written into the header of the file.
 	out_path : str or Path
-		Directory to write the file to.
+		The ITP file (ending in .itp) or a directory, which gets <molname>.itp.
 
 	Returns
 	-------
@@ -197,7 +211,9 @@ def itp_writer(molname, block, cgsmiles_string=None, out_path='.'):
 	mol_out = block.to_molecule()
 	mol_out.meta['molname'] = molname
 
-	path = Path(out_path) / f'{molname}.itp'
+	path = Path(out_path)
+	if path.suffix != '.itp':
+		path = path / f'{molname}.itp'
 	with deferred_open(str(path), 'w') as fout:
 		write_molecule_itp(mol_out, fout, moltype=molname, header=header)
 	DeferredFileWriter().write()

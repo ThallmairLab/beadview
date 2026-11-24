@@ -183,8 +183,13 @@ class CGMapping:
 
 	def write_itp(self, path_out, outname=None):
 		'''
-		Write the loaded ITP with the bead types of the CGSmiles string to <path_out>/<outname>.itp
-		(outname defaults to the molecule type). Changed atoms are commented. The loaded ITP itself is not modified.
+		Write the loaded ITP with the bead types of the CGSmiles string. Changed atoms are commented and the
+		CGSmiles string is written into the header. The loaded ITP itself is not modified.
+
+		path_out is the ITP file to write (e.g. 'itps/V1.itp', the molecule type is then named V1) or a directory,
+		which gets <outname>.itp. outname sets the name of the written molecule type, by default the file name or
+		the name in the loaded ITP. A renamed molecule type also renames its residue if all atoms had the old
+		molecule type as residue name. Returns the path of the written file.
 		'''
 		return self._require_topology().write(path_out, self.cg_graph, outname, self.cgs_string)
 
