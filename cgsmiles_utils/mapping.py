@@ -34,9 +34,14 @@ class CGMapping:
 		self.topology = None
 		self._set_string(cgs_string)
 
-	def _set_string(self, cgs_string):
+	@staticmethod
+	def _resolve(cgs_string):
+		'''(cg_graph, aa_graph) of a CGSmiles string, as resolved by cgsmiles.'''
+		return cgsmiles.MoleculeResolver.from_string(cgs_string).resolve()
+
+	def _set_string(self, cgs_string, graphs=None):
 		self.cgs_string = cgs_string
-		self.cg_graph, self.aa_graph = cgsmiles.MoleculeResolver.from_string(cgs_string).resolve()
+		self.cg_graph, self.aa_graph = graphs if graphs is not None else self._resolve(cgs_string)
 		for _, data in self.cg_graph.nodes(data=True):
 			data["fragname"] = fragname_to_type(data["fragname"])
 			data["atype"] = data["fragname"]
@@ -131,8 +136,15 @@ class CGMapping:
 		-------
 		str
 			The new CGSmiles string, also stored in self.cgs_string.
+
+		The new string is resolved with cgsmiles and compared with the old one: the all-atom molecule, the beads
+		and their atoms must be unchanged and the beads must have the requested types, else a ValueError is
+		raised and the mapping is not changed.
 		'''
-		self._set_string(cgsmiles_string.change_bead_types(self.cgs_string, bead_change))
+		new_string = cgsmiles_string.change_bead_types(self.cgs_string, bead_change)
+		new_graphs = self._resolve(new_string)
+		cgsmiles_string.check_bead_type_change((self.cg_graph, self.aa_graph), new_graphs, bead_change)
+		self._set_string(new_string, new_graphs)
 		return self.cgs_string
 
 	def read_itp(self, path_in, molname=None):

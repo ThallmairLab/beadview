@@ -56,3 +56,31 @@ def test_beads_sharing_a_fragment_share_the_copy():
 	mapping.change_bead_types({'A': 'SN4', 'B': 'SN4'})
 	assert types(mapping) == {'A': 'SN4', 'B': 'SN4'}
 	assert mapping.cgs_string.count('#SN4=') == 1
+
+
+@pytest.mark.parametrize('broken, message', [
+	("{[#SN4;n=A][#SN4;n=B][#SP1;n=C]}.{#SN4=[$]CC[$],#SP1=[$]CN}", 'beads C differ'), # O -> N
+	("{[#SN4;n=A][#SP1;n=C]}.{#SN4=CCCC[$],#SP1=[$]CO}", 'beads'), # bead B lost
+	("{[#SC3;n=A][#SN4;n=B][#SP1;n=C]}.{#SC3=CC[$],#SN4=[$]CC[$],#SP1=[$]CO}", 'not changed as requested'),
+])
+def test_generated_string_is_checked(simple, monkeypatch, broken, message):
+	from cgsmiles_utils import cgsmiles_string
+	before = simple.cgs_string
+	monkeypatch.setattr(cgsmiles_string, 'change_bead_types', lambda string, change: broken)
+	with pytest.raises(ValueError, match=message):
+		simple.change_bead_types({'A': 'SN4'})
+	assert simple.cgs_string == before # mapping unchanged after a failed check
+
+
+def test_check_passes_for_real_changes(azobenzene):
+	azobenzene.change_bead_types({'R2': 'TN1', 'N5': 'SN6a', 'U4': 'U'}) # includes a no-op on a virtual site
+	assert len(azobenzene.cg_graph) == 9
+
+
+def test_check_detects_changed_bonds(simple):
+	from cgsmiles_utils.cgsmiles_string import check_bead_type_change
+	aa = simple.aa_graph.copy()
+	i, j = next((i, j) for i, j in aa.edges if {aa.nodes[i]['element'], aa.nodes[j]['element']} == {'C'})
+	aa.edges[i, j]['order'] = 2
+	with pytest.raises(ValueError, match='different all-atom molecule'):
+		check_bead_type_change((simple.cg_graph, simple.aa_graph), (simple.cg_graph, aa), {})

@@ -94,3 +94,33 @@ def change_bead_types(cgs_string, bead_change):
 	for start, end, new_fragname in sorted(replacements, reverse=True):
 		cg = cg[:start] + new_fragname + cg[end:]
 	return f'{{{cg}}}.{{{",".join(new_definitions + definitions)}}}'
+
+
+def _bead_contents(cg_graph):
+	'''{bead name: sorted elements of its atoms} of the named beads.'''
+	return {data['n']: sorted(atom['element'] for _, atom in data['graph'].nodes(data=True))
+			for _, data in cg_graph.nodes(data=True) if 'n' in data}
+
+
+def check_bead_type_change(old_graphs, new_graphs, bead_change):
+	'''
+	Check that a bead type change (see change_bead_types) only changed bead types, by comparing the resolved
+	graphs (cg_graph, aa_graph) of the old and the new CGSmiles string. Bead types are compared after removing
+	the uniqueness suffix (fragname_to_type). Raises a ValueError describing the first difference.
+	'''
+	import networkx as nx
+	(old_cg, old_aa), (new_cg, new_aa) = old_graphs, new_graphs
+	if len(old_cg) != len(new_cg):
+		raise ValueError(f"The new CGSmiles string has {len(new_cg)} beads instead of {len(old_cg)}.")
+	old_beads, new_beads = _bead_contents(old_cg), _bead_contents(new_cg)
+	if old_beads != new_beads:
+		changed = sorted(set(old_beads) ^ set(new_beads) | {n for n in old_beads.keys() & new_beads.keys() if old_beads[n] != new_beads[n]})
+		raise ValueError(f"The beads {', '.join(changed)} differ between the old and the new CGSmiles string.")
+	match = nx.algorithms.isomorphism.categorical_node_match(['element', 'charge'], [None, 0])
+	edge_match = nx.algorithms.isomorphism.categorical_edge_match('order', 1)
+	if not nx.is_isomorphic(old_aa, new_aa, node_match=match, edge_match=edge_match):
+		raise ValueError("The new CGSmiles string resolves to a different all-atom molecule.")
+	new_types = {data['n']: fragname_to_type(data['fragname']) for _, data in new_cg.nodes(data=True) if 'n' in data}
+	wrong = {name: new_types[name] for name, bead_type in bead_change.items() if new_types[name] != bead_type}
+	if wrong:
+		raise ValueError(f"Bead types were not changed as requested: {wrong}.")
