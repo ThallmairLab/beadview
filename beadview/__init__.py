@@ -1,5 +1,5 @@
 '''
-Utilities for CGSmiles mappings: drawing, structure generation, ITP editing and pKa prediction.
+Utilities for CGSmiles mappings: drawing, structure generation and ITP editing.
 '''
 from .beads import BeadType
 from .drawing.layout import parallel_tails

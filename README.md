@@ -6,7 +6,6 @@ Utilities for coarse-grained (Martini) mappings written as [CGSmiles](https://gi
 - **structures**: all-atom and coarse-grained structure files (PDB, GRO, …) generated from the string
 - **ITP editing**: write an ITP with the bead types of the string, with comments on every changed atom
 - **bead type changes** directly in the CGSmiles string
-- **pKa prediction** with pkasolver (optional)
 
 ## Installation
 
@@ -28,7 +27,6 @@ The other features need these extras:
 | `dev`       | `all` and the test suite                  | pytest, ipython                            |
 
 All of these are plain pip wheels without system libraries.
-`predict_pka()` needs [pkasolver](https://github.com/mayrf/pkasolver), which is not on PyPI; install it from its repository.
 
 ## Quick start
 

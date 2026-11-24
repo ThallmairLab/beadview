@@ -6,7 +6,7 @@ from pathlib import Path
 import cgsmiles
 from rdkit.Chem import MolToSmiles
 
-from . import cgsmiles_string, pka, structure
+from . import cgsmiles_string, structure
 from .beads import fragname_to_type
 from .drawing.options import DrawOptions
 from .drawing.render import Renderer, show_cgsmiles_drawing, show_svg, svg_to_png
@@ -202,24 +202,3 @@ class CGMapping:
 		molecule type as residue name. Returns the path of the written file.
 		'''
 		return self._require_topology().write(path_out, self.cg_graph, outname, self.cgs_string)
-
-	# pKa prediction
-	def predict_pka(self, show_protonation_reactions=False, show_protonation_map=True, print_pka_values=False):
-		'''
-		Predict the pKa values of the molecule with pkasolver (optional dependency).
-
-		Parameters
-		----------
-		show_protonation_reactions : bool
-			Display the network of protonation reactions.
-		show_protonation_map : bool
-			Display the pKa map.
-		print_pka_values : bool
-			Print the pKa values.
-
-		Returns
-		-------
-		list
-			The protonation states with their predicted pKa values.
-		'''
-		return pka.predict_pka(self.aa_graph, show_protonation_reactions, show_protonation_map, print_pka_values)

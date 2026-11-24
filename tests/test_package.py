@@ -9,7 +9,7 @@ from beadview.cgsmiles_string import change_bead_types
 
 from conftest import DATA, SIMPLE
 
-OPTIONAL = ['pkasolver', 'torch', 'IPython', 'marimo', 'MDAnalysis', 'vermouth', 'resvg_py', 'PIL', 'matplotlib']
+OPTIONAL = ['IPython', 'marimo', 'MDAnalysis', 'vermouth', 'resvg_py', 'PIL', 'matplotlib']
 
 
 def run_python(code):

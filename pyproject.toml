@@ -34,7 +34,6 @@ structure = ["MDAnalysis"]
 itp = ["vermouth"]
 all = ["beadview[show,structure,itp]"]
 dev = ["beadview[all]", "pytest", "ipython"]
-# predict_pka() needs pkasolver, which is not on PyPI, see the README
 
 [tool.setuptools.dynamic]
 version = { attr = "beadview.__version__" }

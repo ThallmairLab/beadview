@@ -1,6 +1,3 @@
-import logging
-import sys
-from types import SimpleNamespace
 
 import pytest
 from rdkit import Chem
@@ -151,20 +148,6 @@ def test_get_smiles(simple):
 def test_get_smiles_keeps_double_bond_stereo(smiles):
 	from beadview import CGMapping
 	assert Chem.CanonSmiles(CGMapping(f'{{[#A]}}.{{#A={smiles}}}').get_smiles()) == Chem.CanonSmiles(smiles)
-
-
-def test_predict_pka_restores_global_state(simple, monkeypatch):
-	pytest.importorskip('IPython')
-	from rdkit.Chem.Draw import IPythonConsole # imported before IPython.display is replaced below
-	# stand-ins for pkasolver and IPython, so the test neither needs them nor runs the model
-	fake_pkasolver = SimpleNamespace(calculate_microstate_pka_values=lambda mol: [],
-									 draw_pka_map=lambda results: None, draw_pka_reactions=lambda results: None)
-	monkeypatch.setitem(sys.modules, 'pkasolver.query', fake_pkasolver)
-	monkeypatch.setitem(sys.modules, 'IPython.display', SimpleNamespace(display=lambda obj: None))
-	size = IPythonConsole.molSize
-	simple.predict_pka()
-	assert logging.root.manager.disable == logging.NOTSET
-	assert IPythonConsole.molSize == size
 
 
 CHAIN = '{[#C1;n=A1][#C1;n=A2][#C1;n=A3][#C1;n=A4][#C1;n=A5][#C1;n=A6]}.{#C1=[$]CCCC[$]}'
