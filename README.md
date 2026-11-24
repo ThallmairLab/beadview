@@ -68,21 +68,41 @@ mapping.read_itp("molecule.itp")                  # first molecule type, or moln
 mapping.show(show_bonds=True, show_angles=True, show_dihedrals=True)
 
 mapping.change_bead_types({"R2": "TN1"})
-mapping.change_itp()                              # {block node: 'changed from TC5 to TN1'}
-mapping.write_itp("out_dir", "MOL")               # out_dir/MOL.itp
+mapping.change_itp()                              # preview: {block node: 'changed from TC5 to TN1'}
+mapping.write_itp("itps/MOL.itp")                 # molecule type (and residue) named MOL
+mapping.cg_structure("MOL.gro", resname="MOL")    # beads in the atom order of the ITP
 ```
 
+ITP atoms are matched to beads by name (`n=`). `read_itp` warns (`ITPConsistencyWarning`) about bead names that are
+not unique or missing on one side, beads that are a virtual site only in the ITP or only in the string, and bead
+charges (`q=`) that differ from the ITP. Bonds and other interactions are not compared with the string.
+
 `write_itp` writes the bead types of the CGSmiles string, marks every changed atom with a comment and updates the
-mass when the bead size changes (T/S/R = 36/54/72) and the mass was the default one.
-The CGSmiles string is written into the header of the ITP. ITP atoms are matched to beads by name (`n=`), so
-bead names have to be unique.
+mass when the bead size changes (T/S/R = 36/54/72) and the mass was the default one. Charges are not changed.
+The CGSmiles string is written into the header of the ITP; the loaded ITP itself is never modified.
+
+`change_bead_types` edits the CGSmiles string and checks the result with cgsmiles: the new string must resolve to
+the same atoms and beads, with the requested bead types.
+
+#### Scanning bead types
+
+`with_bead_types` returns a changed copy of a mapping that shares its ITP, so the ITP is read only once:
+
+```python
+base = CGMapping(cgs_string)
+base.read_itp(itp_path, molname)
+for name, bead_change in zip(["V1", "V2"], [{"N6": "TN2a"}, {"N6": "TN3a", "R3": "TC5e"}]):
+    variant = base.with_bead_types(bead_change)
+    variant.write_itp(f"itps/{name}.itp")                          # molecule type and residue name = name
+    variant.cg_structure(f"solute/{name}.gro", resname=name)        # bead order from the ITP
+```
 
 ## CGSmiles annotations used
 
 | annotation | on    | meaning |
 |------------|-------|---------|
 | `n=`       | bead  | bead name, used for labels, structure files and matching ITP atoms |
-| `index=`   | bead  | bead order in `cg_structure` (default: the number in the bead name, then the order in the string) |
+| `index=`   | bead  | bead order in `cg_structure` without ITP; all beads need one (default: the numbers at the end of the bead names if all have one, else the order in the string) |
 | `w=`       | atom  | mapping weight of the atom in the bead position (default 1) |
 | `wVS=`     | atom  | weight of the atom in the position of a neighboring virtual site; a hydrogen without one uses the value of its heavy atom (default: `w`) |
 
