@@ -119,6 +119,10 @@ class CGMapping:
 		If write_aa, the matching all-atom structure is written next to it (``_cg`` in the file name
 		replaced by ``_aa``, or ``_aa`` appended). random_seed makes the conformer reproducible;
 		None gives a different one on every call.
+
+		With a loaded ITP, the beads are written in the atom order of the ITP and resname defaults to its residue
+		name. Without, they are ordered by their index annotation (all beads need one), else by the number at the
+		end of their names (if all have one), else as in the CGSmiles string; resname defaults to the file name.
 		'''
 		return structure.cg_structure(self, out_file, resname, write_aa, random_seed)
 
