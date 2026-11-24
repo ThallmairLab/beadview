@@ -1,6 +1,6 @@
 import pytest
 
-from CGSmiles_utils.itp_utils import itp_writer, add_comments_itp
+from cgsmiles_utils.topology import itp_writer, add_comments_itp
 
 
 def atom_lines(path):
@@ -34,7 +34,7 @@ def test_write_itp_twice_is_identical(azobenzene, tmp_path):
 
 def test_write_itp_does_not_modify_loaded_itp(azobenzene, tmp_path):
 	azobenzene.write_itp(tmp_path, 'out')
-	assert azobenzene.ff.blocks['AZB'].nodes[1]['atype'] == 'TN1'
+	assert azobenzene.topology.block.nodes[1]['atype'] == 'TN1'
 
 
 def test_change_itp_reports_relative_to_file(azobenzene):
@@ -53,7 +53,7 @@ def test_mass_follows_size_change(azobenzene, tmp_path):
 
 
 def test_itp_writer_without_cgsmiles_string(azobenzene, tmp_path):
-	path = itp_writer('plain', azobenzene.ff.blocks['AZB'], None, tmp_path)
+	path = itp_writer('plain', azobenzene.topology.block, None, tmp_path)
 	assert path == tmp_path / 'plain.itp'
 	assert 'CGSmiles' not in path.read_text()
 
@@ -66,7 +66,7 @@ def test_add_comments_without_bonds_section(tmp_path):
 
 
 def test_duplicate_bead_names_are_rejected(tmp_path):
-	from CGSmiles_utils import CGMapping
+	from cgsmiles_utils import CGMapping
 	mapping = CGMapping("{[#SC3;n=A][#SN4;n=A]}.{#SC3=CC[$],#SN4=[$]CO}")
 	itp = tmp_path / 'dup.itp'
 	itp.write_text("[ moleculetype ]\nDUP 1\n[ atoms ]\n1 SC3 1 DUP A 1 0 54\n2 SN4 1 DUP A 2 0 54\n")

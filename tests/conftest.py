@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from CGSmiles_utils import CGMapping
+from cgsmiles_utils import CGMapping
 
 DATA = Path(__file__).parent / 'data'
 

@@ -1,0 +1,96 @@
+'''
+Editing of CGSmiles strings.
+'''
+import re
+import string
+
+from .beads import fragname_to_type
+
+BEAD_PATTERN = re.compile(r'\[#([^\];]+)([^\]]*)\]') # [#fragname;annotations]
+
+
+def split_top_level(text, sep=','):
+	'''Split text at sep, ignoring separators inside brackets.'''
+	parts, depth, start = [], 0, 0
+	for i, char in enumerate(text):
+		if char in '[({':
+			depth += 1
+		elif char in '])}':
+			depth -= 1
+		elif char == sep and depth == 0:
+			parts.append(text[start:i])
+			start = i + 1
+	parts.append(text[start:])
+	return parts
+
+
+def change_bead_types(cgs_string, bead_change):
+	'''
+	Change the types of beads in a CGSmiles string, selected by their name (n= annotation).
+
+	Each changed bead gets its own copy of its fragment, named after the new type. If that
+	name is already taken, an uppercase letter is appended (e.g. TC5Z), which is removed
+	again when the type is read (see fragname_to_type). All other annotations of the beads are kept.
+
+	Parameters
+	----------
+	cgs_string : str
+		CGSmiles string with two resolutions, {cg}.{fragments}.
+	bead_change : dict
+		{bead name: new bead type}
+
+	Returns
+	-------
+	str
+		The new CGSmiles string.
+	'''
+	resolutions = re.split(r'\}\s*\.\s*\{', cgs_string.strip())
+	if len(resolutions) != 2 or not resolutions[0].startswith('{') or not resolutions[1].endswith('}'):
+		raise ValueError("change_bead_types only supports CGSmiles strings with two resolutions, {cg}.{fragments}.")
+	cg, fragments = resolutions[0][1:], resolutions[1][:-1]
+	definitions = [part.strip() for part in split_top_level(fragments)]
+	fragment_bodies = {} # fragment name -> definition without '#name'
+	for definition in definitions:
+		name, _, _ = definition.lstrip('#').partition('=')
+		fragment_bodies[name] = definition[len(name) + 1:]
+
+	beads = {} # bead name -> match of the bead in the cg part
+	for match in BEAD_PATTERN.finditer(cg):
+		name = re.search(r';n=([^;\]]+)', match.group(2))
+		if name is None:
+			continue
+		if name.group(1) in beads:
+			raise ValueError(f"Bead name {name.group(1)} is not unique in the CGSmiles string.")
+		beads[name.group(1)] = match
+	unknown = [name for name in bead_change if name not in beads]
+	if unknown:
+		raise ValueError(f"No bead named {', '.join(unknown)} in the CGSmiles string. Named beads: {', '.join(beads)}.")
+
+	used = set(fragment_bodies) | {match.group(1) for match in BEAD_PATTERN.finditer(cg)}
+	def unique_fragname(bead_type):
+		if bead_type not in used and fragname_to_type(bead_type) == bead_type:
+			return bead_type
+		for letter in reversed(string.ascii_uppercase):
+			if bead_type + letter not in used:
+				return bead_type + letter
+		raise ValueError(f"No unique fragment name left for bead type {bead_type}.")
+
+	copies = {} # (old fragment, new type) -> new fragment, so beads sharing a fragment share the copy
+	new_definitions = []
+	replacements = [] # (start, end, new fragment) of the fragment names in the cg part
+	for name, bead_type in bead_change.items():
+		match = beads[name]
+		fragname = match.group(1)
+		if fragname_to_type(fragname) == bead_type:
+			continue
+		if (fragname, bead_type) not in copies:
+			new_fragname = unique_fragname(bead_type)
+			used.add(new_fragname)
+			copies[(fragname, bead_type)] = new_fragname
+			if fragname in fragment_bodies: # fragments without atoms (e.g. virtual sites) have no definition
+				new_definitions.append(f'#{new_fragname}{fragment_bodies[fragname]}')
+		replacements.append((match.start(1), match.end(1), copies[(fragname, bead_type)]))
+
+	for start, end, new_fragname in sorted(replacements, reverse=True):
+		cg = cg[:start] + new_fragname + cg[end:]
+	return f'{{{cg}}}.{{{",".join(new_definitions + definitions)}}}'

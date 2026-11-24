@@ -2,7 +2,7 @@ import MDAnalysis as mda
 import numpy as np
 import pytest
 
-from CGSmiles_utils import CGMapping
+from cgsmiles_utils import CGMapping
 
 
 def test_cg_structure(azobenzene, tmp_path):

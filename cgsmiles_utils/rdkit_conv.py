@@ -1,17 +1,8 @@
+import warnings
+
 import networkx as nx
 from rdkit import Chem
 
-
-def write_file(file_path, lines) -> None:
-	'''
-	Function that writes a list of lines to a text file.
-	'''
-	# check if lines is a list of strings
-	if not all(isinstance(line, str) for line in lines):
-		raise ValueError('lines must be a list of strings')
-	with open(file_path, 'w') as file:
-		file.writelines(lines)
-	return 
 
 def cgsmiles_to_rdkit(mol_graph, add_hydrogens=False):
 	'''
@@ -72,8 +63,8 @@ def cgsmiles_to_rdkit(mol_graph, add_hydrogens=False):
 			continue
 		bond = mol.GetBondBetweenAtoms(isomer[1], isomer[2])
 		if not bond.GetBondType() == Chem.rdchem.BondType.DOUBLE:
-			print(f'WARNING: Isomerisation defined on non-double bond! (atoms {isomer[1]}-{isomer[2]})')
-			print('	Check your CGSMILES string!')
+			warnings.warn(f'Isomerisation defined on non-double bond (atoms {isomer[1]}-{isomer[2]}), it is ignored. '
+						  'Check your CGSmiles string.')
 			continue
 		bond.SetStereoAtoms(isomer[0], isomer[3])
 		if isomer_type == 'cis':

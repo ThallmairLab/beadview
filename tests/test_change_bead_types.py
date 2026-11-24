@@ -1,6 +1,6 @@
 import pytest
 
-from CGSmiles_utils import CGMapping
+from cgsmiles_utils import CGMapping
 
 
 def types(mapping):
