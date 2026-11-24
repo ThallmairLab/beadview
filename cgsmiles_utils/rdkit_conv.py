@@ -55,7 +55,9 @@ def cgsmiles_to_rdkit(mol_graph, add_hydrogens=False):
 		mol.AddBond(i,j, bond_order)
 
 	# add isomerism information if present
-	isomer_data = [d[0] for d in nx.get_node_attributes(mol_graph, 'ez_isomer').values() if d is not None]
+	# each atom lists the double bonds it is a stereo atom of (two in e.g. C/C=C\C/C=C\C)
+	isomer_data = [isomer for isomers in nx.get_node_attributes(mol_graph, 'ez_isomer').values() if isomers
+				   for isomer in isomers]
 	for isomer in isomer_data:  
 		isomer_type = isomer[4]
 		isomer = [idx_mapping[idx] for idx in isomer[:4]]  # convert to rdkit indices

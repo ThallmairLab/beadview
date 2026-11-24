@@ -103,7 +103,8 @@ def test_get_smiles(simple):
 	assert simple.get_smiles(add_hydrogens=True).count('[H]') == 12
 
 
-@pytest.mark.parametrize('smiles', ['CC/C=C\\CC', 'CC/C=C/CC', 'CC/C=C(\\Cl)CC', 'CC/C=C(/Cl)CC'])
+@pytest.mark.parametrize('smiles', ['CC/C=C\\CC', 'CC/C=C/CC', 'CC/C=C(\\Cl)CC', 'CC/C=C(/Cl)CC',
+									'C/C=C\\CC/C=C\\C', 'C/C=C\\C\\C=C/C', 'CC/C=C/C=C/C'])
 def test_get_smiles_keeps_double_bond_stereo(smiles):
 	from cgsmiles_utils import CGMapping
 	assert Chem.CanonSmiles(CGMapping(f'{{[#A]}}.{{#A={smiles}}}').get_smiles()) == Chem.CanonSmiles(smiles)
