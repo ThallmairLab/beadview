@@ -2,7 +2,7 @@ import pytest
 
 from conftest import DATA
 
-from cgsmiles_utils.topology import ITPConsistencyWarning, itp_writer, add_comments_itp
+from beadview.topology import ITPConsistencyWarning, itp_writer, add_comments_itp
 
 
 def atom_lines(path):
@@ -68,7 +68,7 @@ def test_add_comments_without_bonds_section(tmp_path):
 
 
 def test_interaction_comments_are_kept(tmp_path):
-	from cgsmiles_utils import CGMapping
+	from beadview import CGMapping
 	mapping = CGMapping("{[#SC3;n=A][#SN4;n=B]}.{#SC3=CC[$],#SN4=[$]CO}")
 	itp = tmp_path / 'two.itp'
 	itp.write_text("[ moleculetype ]\nTWO 1\n[ atoms ]\n1 SC3 1 TWO A 1 0 54\n2 SN4 1 TWO B 2 0 54\n"
@@ -79,7 +79,7 @@ def test_interaction_comments_are_kept(tmp_path):
 
 
 def test_duplicate_bead_names_are_rejected(tmp_path):
-	from cgsmiles_utils import CGMapping
+	from beadview import CGMapping
 	mapping = CGMapping("{[#SC3;n=A][#SN4;n=A]}.{#SC3=CC[$],#SN4=[$]CO}")
 	itp = tmp_path / 'dup.itp'
 	itp.write_text("[ moleculetype ]\nDUP 1\n[ atoms ]\n1 SC3 1 DUP A 1 0 54\n2 SN4 1 DUP A 2 0 54\n")
@@ -128,7 +128,7 @@ def test_write_itp_keeps_name_without_rename(azobenzene, tmp_path):
 
 
 def test_write_itp_keeps_other_residue_names(tmp_path):
-	from cgsmiles_utils import CGMapping
+	from beadview import CGMapping
 	mapping = CGMapping("{[#SC3;n=A][#SN4;n=B]}.{#SC3=CC[$],#SN4=[$]CO}")
 	itp = tmp_path / 'two.itp'
 	itp.write_text("[ moleculetype ]\nTWO 1\n[ atoms ]\n1 SC3 1 RA A 1 0 54\n2 SN4 2 RB B 2 0 54\n")
@@ -139,7 +139,7 @@ def test_write_itp_keeps_other_residue_names(tmp_path):
 
 
 def check_problems(string, itp_text, tmp_path):
-	from cgsmiles_utils import CGMapping
+	from beadview import CGMapping
 	itp = tmp_path / 'check.itp'
 	itp.write_text(itp_text)
 	with pytest.warns(ITPConsistencyWarning) as record:
@@ -158,7 +158,7 @@ def test_check_missing_beads(tmp_path):
 
 def test_check_ignores_virtual_sites(tmp_path):
 	import warnings
-	from cgsmiles_utils import CGMapping
+	from beadview import CGMapping
 	itp = tmp_path / 'vs.itp'
 	itp.write_text(ATOMS + "[ virtual_sitesn ]\n2 1 1\n") # B is a virtual site in the ITP but bonded in the string
 	with warnings.catch_warnings():
@@ -173,7 +173,7 @@ def test_check_charges(tmp_path):
 
 def test_check_ignores_bonds(azobenzene, tmp_path):
 	import warnings
-	from cgsmiles_utils import CGMapping
+	from beadview import CGMapping
 	itp = tmp_path / 'bond.itp'
 	# A and C are not neighbors in the string, the ITP bonds them anyway
 	itp.write_text("[ moleculetype ]\nMOL 1\n[ atoms ]\n1 SC3 1 MOL A 1 0 54\n2 SN4 1 MOL B 2 0 54\n"
@@ -195,7 +195,7 @@ def test_vs_constructions_follow_the_itp(azobenzene):
 
 def test_vs_construction_drawn_from_itp_only(tmp_path):
 	# B is a virtual site of A in the ITP, but an ordinary bonded bead in the CGSmiles string
-	from cgsmiles_utils import CGMapping
+	from beadview import CGMapping
 	itp = tmp_path / 'vs.itp'
 	itp.write_text(ATOMS + "[ virtual_sitesn ]\n2 1 1\n")
 	mapping = CGMapping("{[#SC3;n=A][#SN4;n=B]}.{#SC3=CC[$],#SN4=[$]CO}")

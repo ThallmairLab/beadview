@@ -3,9 +3,9 @@ import sys
 
 import pytest
 
-import cgsmiles_utils
-from cgsmiles_utils import CGMapping, Topology
-from cgsmiles_utils.cgsmiles_string import change_bead_types
+import beadview
+from beadview import CGMapping, Topology
+from beadview.cgsmiles_string import change_bead_types
 
 from conftest import DATA, SIMPLE
 
@@ -17,17 +17,17 @@ def run_python(code):
 
 
 def test_public_api():
-	assert set(cgsmiles_utils.__all__) >= {'CGMapping', 'DrawOptions', 'BeadType', 'Topology'}
-	assert cgsmiles_utils.__version__
+	assert set(beadview.__all__) >= {'CGMapping', 'DrawOptions', 'BeadType', 'Topology'}
+	assert beadview.__version__
 
 
 def test_import_does_not_load_optional_dependencies():
-	loaded = run_python(f"import sys, cgsmiles_utils; print([m for m in {OPTIONAL!r} if m in sys.modules])")
+	loaded = run_python(f"import sys, beadview; print([m for m in {OPTIONAL!r} if m in sys.modules])")
 	assert loaded.strip() == '[]'
 
 
 def test_drawing_does_not_load_optional_dependencies():
-	loaded = run_python(f"import sys; from cgsmiles_utils import CGMapping; CGMapping({SIMPLE!r}).to_svg(); "
+	loaded = run_python(f"import sys; from beadview import CGMapping; CGMapping({SIMPLE!r}).to_svg(); "
 						f"print([m for m in {OPTIONAL!r} if m in sys.modules])")
 	assert loaded.strip() == '[]'
 
@@ -35,7 +35,7 @@ def test_drawing_does_not_load_optional_dependencies():
 def test_show_outside_notebook_uses_matplotlib():
 	# RDKit's drawing code is imported first: with cairosvg this order crashed show()
 	shape = run_python("import matplotlib; matplotlib.use('Agg'); from rdkit.Chem import Draw; import IPython; "
-					   f"from cgsmiles_utils import CGMapping; ax = CGMapping({SIMPLE!r}).show(canvas_size=(300, 300)); "
+					   f"from beadview import CGMapping; ax = CGMapping({SIMPLE!r}).show(canvas_size=(300, 300)); "
 					   "print(ax.images[0].get_array().shape)")
 	assert shape.strip() == '(900, 900, 4)' # PNG at 3x the canvas size
 
@@ -51,7 +51,7 @@ def test_show_on_axis(simple):
 
 
 def test_show_in_notebook_displays_svg(simple, monkeypatch):
-	from cgsmiles_utils.drawing import render
+	from beadview.drawing import render
 	shown = []
 	monkeypatch.setattr(render, '_notebook_display', lambda: shown.append)
 	assert simple.show(show_bead_labels=True) is None
@@ -59,7 +59,7 @@ def test_show_in_notebook_displays_svg(simple, monkeypatch):
 
 
 def test_notebook_detection_outside_notebook():
-	from cgsmiles_utils.drawing.render import _notebook_display
+	from beadview.drawing.render import _notebook_display
 	assert _notebook_display() is None # pytest is neither a Jupyter kernel nor marimo
 
 

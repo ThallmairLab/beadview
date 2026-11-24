@@ -1,6 +1,6 @@
 import pytest
 
-from cgsmiles_utils.beads import BeadType, fragname_to_type
+from beadview.beads import BeadType, fragname_to_type
 
 
 @pytest.mark.parametrize('name, size, chemical_class, radius, color', [

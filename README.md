@@ -1,4 +1,4 @@
-# cgsmiles_utils
+# beadview
 
 Utilities for coarse-grained (Martini) mappings written as [CGSmiles](https://github.com/gruenewald-lab/CGsmiles) strings:
 
@@ -30,13 +30,11 @@ The other features need these extras:
 All of these are plain pip wheels without system libraries.
 `predict_pka()` needs [pkasolver](https://github.com/mayrf/pkasolver), which is not on PyPI; install it from its repository.
 
-The package was renamed from `CGSmiles_utils` to `cgsmiles_utils`; update old imports to `cgsmiles_utils`.
-
 ## Quick start
 
 ```python
 import matplotlib.pyplot as plt
-from cgsmiles_utils import CGMapping, DrawOptions
+from beadview import CGMapping, DrawOptions
 
 mapping = CGMapping("{[#SC3;n=A][#SN4;n=B][#SP1;n=C]}.{#SC3=CC[$],#SN4=[$]CC[$],#SP1=[$]CO}")
 
@@ -190,7 +188,7 @@ straight zigzag chains pointing down, side by side `spacing=4.0` apart (RDKit un
 of the atoms in the CGSmiles string. Cis double bonds keep their geometry as a sideways step in the chain.
 
 ```python
-from cgsmiles_utils import parallel_tails
+from beadview import parallel_tails
 
 lipid.save("popc.svg", fixed_coords=parallel_tails())
 lipid.save("popc_h.svg", fixed_coords=parallel_tails(spacing=6), show_hydrogens=True, rotate_by=180)

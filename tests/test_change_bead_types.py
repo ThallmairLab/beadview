@@ -1,6 +1,6 @@
 import pytest
 
-from cgsmiles_utils import CGMapping
+from beadview import CGMapping
 
 
 def types(mapping):
@@ -64,7 +64,7 @@ def test_beads_sharing_a_fragment_share_the_copy():
 	("{[#SC3;n=A][#SN4;n=B][#SP1;n=C]}.{#SC3=CC[$],#SN4=[$]CC[$],#SP1=[$]CO}", 'not changed as requested'),
 ])
 def test_generated_string_is_checked(simple, monkeypatch, broken, message):
-	from cgsmiles_utils import cgsmiles_string
+	from beadview import cgsmiles_string
 	before = simple.cgs_string
 	monkeypatch.setattr(cgsmiles_string, 'change_bead_types', lambda string, change: broken)
 	with pytest.raises(ValueError, match=message):
@@ -78,7 +78,7 @@ def test_check_passes_for_real_changes(azobenzene):
 
 
 def test_check_detects_changed_bonds(simple):
-	from cgsmiles_utils.cgsmiles_string import check_bead_type_change
+	from beadview.cgsmiles_string import check_bead_type_change
 	aa = simple.aa_graph.copy()
 	i, j = next((i, j) for i, j in aa.edges if {aa.nodes[i]['element'], aa.nodes[j]['element']} == {'C'})
 	aa.edges[i, j]['order'] = 2

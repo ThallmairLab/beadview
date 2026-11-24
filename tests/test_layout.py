@@ -2,10 +2,10 @@ import numpy as np
 import pytest
 from rdkit import Chem
 
-from cgsmiles_utils import CGMapping, DrawOptions, parallel_tails
-from cgsmiles_utils.drawing import Renderer
-from cgsmiles_utils.drawing.layout import BOND_LENGTH, find_tails, zigzag
-from cgsmiles_utils.rdkit_conv import cgsmiles_to_rdkit
+from beadview import CGMapping, DrawOptions, parallel_tails
+from beadview.drawing import Renderer
+from beadview.drawing.layout import BOND_LENGTH, find_tails, zigzag
+from beadview.rdkit_conv import cgsmiles_to_rdkit
 
 # POPC: oleoyl (cis double bond) at sn-2, palmitoyl at sn-1
 POPC = ("{[#Q1;n=NC3][#Q5;n=PO4][#SN4a;n=GL1]([#C1;n=C1A][#C4h;n=D2A][#C1;n=C3A][#SC1;n=C4A])"

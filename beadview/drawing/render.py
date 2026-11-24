@@ -374,7 +374,7 @@ def svg_to_png(svg_text, zoom=PNG_ZOOM):
 		import resvg_py
 	except ImportError:
 		raise ImportError("Showing drawings on matplotlib axes needs resvg-py, "
-						  "install it with: pip install 'cgsmiles-utils[show]'") from None
+						  "install it with: pip install 'beadview[show]'") from None
 	return bytes(resvg_py.svg_to_bytes(svg_string=svg_text, zoom=zoom))
 
 

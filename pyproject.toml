@@ -3,7 +3,7 @@ requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "cgsmiles-utils"
+name = "beadview"
 dynamic = ["version"]
 description = "Drawing, structure generation and ITP editing for CGSmiles coarse-grained mappings"
 readme = "README.md"
@@ -32,15 +32,15 @@ show = ["matplotlib", "pillow", "resvg-py>=0.5,<0.6", "scipy"]
 structure = ["MDAnalysis"]
 # read_itp(), change_itp() and write_itp()
 itp = ["vermouth"]
-all = ["cgsmiles-utils[show,structure,itp]"]
-dev = ["cgsmiles-utils[all]", "pytest", "ipython"]
+all = ["beadview[show,structure,itp]"]
+dev = ["beadview[all]", "pytest", "ipython"]
 # predict_pka() needs pkasolver, which is not on PyPI, see the README
 
 [tool.setuptools.dynamic]
-version = { attr = "cgsmiles_utils.__version__" }
+version = { attr = "beadview.__version__" }
 
 [tool.setuptools.packages.find]
-include = ["cgsmiles_utils*"]
+include = ["beadview*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

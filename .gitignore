@@ -1,7 +1,3 @@
-# old folder
-M3_parametrization/old/*
-*sh
-
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

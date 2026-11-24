@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from cgsmiles_utils import CGMapping
+from beadview import CGMapping
 
 DATA = Path(__file__).parent / 'data'
 

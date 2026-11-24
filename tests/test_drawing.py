@@ -5,8 +5,8 @@ from types import SimpleNamespace
 import pytest
 from rdkit import Chem
 
-from cgsmiles_utils.beads import bead_position
-from cgsmiles_utils.drawing.geometry import most_vertical_bonds
+from beadview.beads import bead_position
+from beadview.drawing.geometry import most_vertical_bonds
 
 
 @pytest.mark.parametrize('style', ['beads', 'outline'])
@@ -46,14 +46,14 @@ def test_bead_coordinate_without_weight():
 
 def test_element_ids_are_unique():
 	import re
-	from cgsmiles_utils import CGMapping
+	from beadview import CGMapping
 	svg = CGMapping("{[#SC3][#SC3]}.{#SC3=[$]CC[$]}").to_svg(show_bead_labels=True)
 	ids = re.findall(r'id="([^"]+)"', svg)
 	assert len(ids) == len(set(ids)) == 4 # two circles, two labels
 
 
 def test_label_text_is_escaped():
-	from cgsmiles_utils import CGMapping
+	from beadview import CGMapping
 	svg = CGMapping("{[#SC3;n=A&B][#SN4]}.{#SC3=CC[$],#SN4=[$]CO}").to_svg(show_bead_labels=True)
 	assert '>A&amp;B</tspan>' in svg
 
@@ -82,7 +82,7 @@ def element_colors(svg, prefix):
 
 
 def test_vs_construction(azobenzene):
-	from cgsmiles_utils.drawing.options import VS_PALETTE
+	from beadview.drawing.options import VS_PALETTE
 	svg = azobenzene.to_svg(show_vs_construction=True, show_bead_labels=True)
 	colors = element_colors(svg, 'vs_')
 	assert set(colors) == {f'vs_U4_{b}' for b in ('R1', 'R2', 'R3')} | {f'vs_U9_{b}' for b in ('R6', 'R7', 'R8')}
@@ -96,7 +96,7 @@ def test_vs_construction(azobenzene):
 
 
 def test_angle_and_dihedral_palettes(azobenzene):
-	from cgsmiles_utils.drawing.options import ANGLE_PALETTE, DIHEDRAL_PALETTE
+	from beadview.drawing.options import ANGLE_PALETTE, DIHEDRAL_PALETTE
 	svg = azobenzene.to_svg(show_angles=True, show_dihedrals=True)
 	angles = element_colors(svg, 'angle_')
 	assert len(angles) == 3 and set(angles.values()) == set(ANGLE_PALETTE[:3])
@@ -149,7 +149,7 @@ def test_get_smiles(simple):
 @pytest.mark.parametrize('smiles', ['CC/C=C\\CC', 'CC/C=C/CC', 'CC/C=C(\\Cl)CC', 'CC/C=C(/Cl)CC',
 									'C/C=C\\CC/C=C\\C', 'C/C=C\\C\\C=C/C', 'CC/C=C/C=C/C'])
 def test_get_smiles_keeps_double_bond_stereo(smiles):
-	from cgsmiles_utils import CGMapping
+	from beadview import CGMapping
 	assert Chem.CanonSmiles(CGMapping(f'{{[#A]}}.{{#A={smiles}}}').get_smiles()) == Chem.CanonSmiles(smiles)
 
 
@@ -178,7 +178,7 @@ def view_box(svg):
 
 def test_auto_canvas_contains_all_beads_and_labels():
 	import re
-	from cgsmiles_utils import CGMapping
+	from beadview import CGMapping
 	svg = CGMapping(CHAIN).to_svg(show_bead_labels=True, padding=0)
 	x0, y0, x1, y1 = view_box(svg)
 	circles = [(float(cx), float(cy), float(r)) for cx, cy, r in re.findall(r'cx="([^"]+)" cy="([^"]+)" r="([^"]+)"', svg)]
@@ -209,7 +209,7 @@ def test_invalid_canvas_size(simple):
 
 
 def test_content_bbox_path_commands():
-	from cgsmiles_utils.drawing.svg import content_bbox
+	from beadview.drawing.svg import content_bbox
 	svg = ("<path d='M 10,20 H 50 V 70 A 5 5 0 0 1 -5,30 Q 12 13, 14 15' />"
 		   '<circle cx="100" cy="100" r="10" /><line x1="0" y1="0" x2="1" y2="200" />'
 		   "<rect width='999' height='999' x='-500' y='-500'> </rect>")
@@ -233,8 +233,8 @@ def test_bead_radii_by_type_and_size(simple):
 
 
 def test_custom_radius_moves_dummy_label():
-	from cgsmiles_utils.beads import BeadType
-	from cgsmiles_utils.drawing.labels import label_above_bead
+	from beadview.beads import BeadType
+	from beadview.drawing.labels import label_above_bead
 	dummy = BeadType('U')
 	assert label_above_bead((0, 0), dummy, 'U1', radius=20)[1] == pytest.approx(-21)
 	assert label_above_bead((0, 0), dummy, 'U1')[1] == pytest.approx(-dummy.radius - 1)

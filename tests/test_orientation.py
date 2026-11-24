@@ -2,9 +2,9 @@ import numpy as np
 import pytest
 from rdkit.Chem import rdDepictor
 
-from cgsmiles_utils import CGMapping, DrawOptions, parallel_tails
-from cgsmiles_utils.drawing import Renderer
-from cgsmiles_utils.drawing.orientation import bead_centers, parse_rotation
+from beadview import CGMapping, DrawOptions, parallel_tails
+from beadview.drawing import Renderer
+from beadview.drawing.orientation import bead_centers, parse_rotation
 from test_layout import POPC
 
 # phenyl - ethyl - hydroxymethyl, and variants of it

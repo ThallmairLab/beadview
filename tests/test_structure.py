@@ -2,7 +2,7 @@ import MDAnalysis as mda
 import numpy as np
 import pytest
 
-from cgsmiles_utils import CGMapping
+from beadview import CGMapping
 
 
 def test_cg_structure(azobenzene, tmp_path):
@@ -59,7 +59,7 @@ def test_cg_structure_of_variant_matches_written_itp(azobenzene, tmp_path):
 
 
 def test_bead_order_without_itp(azobenzene):
-	from cgsmiles_utils.structure import _bead_order
+	from beadview.structure import _bead_order
 	names = lambda mapping: [mapping.cg_graph.nodes[n]['atomname'] for n in _bead_order(mapping.cg_graph)]
 	azobenzene.topology = None
 	assert names(azobenzene) == ['R1', 'R2', 'R3', 'U4', 'N5', 'R6', 'R7', 'R8', 'U9'] # by name number
