@@ -27,7 +27,7 @@ dependencies = [
 
 [project.optional-dependencies]
 # CGMapping.show() and show_default()
-show = ["matplotlib", "pillow", "cairosvg", "scipy"]
+show = ["matplotlib", "pillow", "resvg-py>=0.5,<0.6", "scipy"]
 # aa_structure() and cg_structure()
 structure = ["MDAnalysis"]
 # read_itp(), change_itp() and write_itp()

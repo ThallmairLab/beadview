@@ -9,7 +9,7 @@ from cgsmiles_utils.cgsmiles_string import change_bead_types
 
 from conftest import DATA, SIMPLE
 
-OPTIONAL = ['pkasolver', 'torch', 'IPython', 'MDAnalysis', 'vermouth', 'fast_forward', 'cairosvg', 'PIL', 'matplotlib']
+OPTIONAL = ['pkasolver', 'torch', 'IPython', 'marimo', 'MDAnalysis', 'vermouth', 'resvg_py', 'PIL', 'matplotlib']
 
 
 def run_python(code):
@@ -32,12 +32,39 @@ def test_drawing_does_not_load_optional_dependencies():
 	assert loaded.strip() == '[]'
 
 
-def test_show_after_rdkit_drawing_was_imported():
-	# cairosvg segfaults in a process that loaded RDKit's drawing code first; show() must not crash
-	shape = run_python("import matplotlib; matplotlib.use('Agg'); from rdkit.Chem import Draw; "
+def test_show_outside_notebook_uses_matplotlib():
+	# RDKit's drawing code is imported first: with cairosvg this order crashed show()
+	shape = run_python("import matplotlib; matplotlib.use('Agg'); from rdkit.Chem import Draw; import IPython; "
 					   f"from cgsmiles_utils import CGMapping; ax = CGMapping({SIMPLE!r}).show(); "
 					   "print(ax.images[0].get_array().shape)")
-	assert shape.strip() == '(300, 300, 4)'
+	assert shape.strip() == '(900, 900, 4)' # PNG at 3x the canvas size
+
+
+def test_show_on_axis(simple):
+	import matplotlib
+	matplotlib.use('Agg')
+	import matplotlib.pyplot as plt
+	fig, axs = plt.subplots(1, 2)
+	assert simple.show(ax=axs[1], canvas_size=(200, 100)) is axs[1]
+	assert axs[1].images[0].get_array().shape == (300, 600, 4)
+	plt.close(fig)
+
+
+def test_show_in_notebook_displays_svg(simple, monkeypatch):
+	from cgsmiles_utils.drawing import render
+	shown = []
+	monkeypatch.setattr(render, '_notebook_display', lambda: shown.append)
+	assert simple.show(show_bead_labels=True) is None
+	assert shown[0]._repr_svg_() == simple.to_svg(show_bead_labels=True)
+
+
+def test_notebook_detection_outside_notebook():
+	from cgsmiles_utils.drawing.render import _notebook_display
+	assert _notebook_display() is None # pytest is neither a Jupyter kernel nor marimo
+
+
+def test_repr_svg(simple):
+	assert simple._repr_svg_() == simple.to_svg()
 
 
 def test_topology_from_itp():

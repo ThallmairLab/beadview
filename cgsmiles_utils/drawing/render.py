@@ -2,7 +2,6 @@
 Drawing of a CGMapping: the atomistic molecule (RDKit), the beads, the interactions of the loaded ITP and the bead labels.
 '''
 import io
-import subprocess
 import sys
 from dataclasses import dataclass
 
@@ -278,24 +277,64 @@ class Renderer:
 		return [(center[0] - width / 2, center[1] + (above - below) / 2) for center, (width, above, below) in zip(centers, extents)]
 
 
-def svg_to_png(svg_text, dpi=300):
+PNG_ZOOM = 3 # resolution of the PNG shown on matplotlib axes, relative to the canvas size
+
+
+class SVGDrawing:
+	'''An SVG string that Jupyter and marimo display as image.'''
+	def __init__(self, svg_text):
+		self.svg_text = svg_text
+
+	def _repr_svg_(self):
+		return self.svg_text
+
+
+def svg_to_png(svg_text, zoom=PNG_ZOOM):
+	'''Convert an SVG string to PNG bytes with resvg, zoom times the size of the SVG.'''
+	try:
+		import resvg_py
+	except ImportError:
+		raise ImportError("Showing drawings on matplotlib axes needs resvg-py, "
+						  "install it with: pip install 'cgsmiles-utils[show]'") from None
+	return bytes(resvg_py.svg_to_bytes(svg_string=svg_text, zoom=zoom))
+
+
+def _notebook_display():
 	'''
-	Convert an SVG string to PNG bytes with cairosvg. cairosvg runs in a separate process because its
-	cairo library crashes (segmentation fault) when RDKit's drawing code was loaded first in the same process.
+	The function that displays an object in the running notebook (Jupyter or marimo),
+	or None outside of a notebook.
 	'''
-	code = ('import sys, cairosvg; '
-			'sys.stdout.buffer.write(cairosvg.svg2png(bytestring=sys.stdin.buffer.read(), dpi=int(sys.argv[1])))')
-	result = subprocess.run([sys.executable, '-c', code, str(dpi)], input=svg_text.encode(), capture_output=True)
-	if result.returncode != 0:
-		raise RuntimeError(f"Converting the SVG to PNG with cairosvg failed: {result.stderr.decode().strip()}")
-	return result.stdout
+	if 'marimo' in sys.modules: # only imported by marimo itself or the user
+		import marimo
+		if marimo.running_in_notebook():
+			return marimo.output.append
+	if 'IPython' in sys.modules:
+		from IPython import get_ipython
+		shell = get_ipython()
+		if shell is not None and 'IPKernelApp' in shell.config: # a Jupyter kernel, not the IPython terminal
+			from IPython.display import display
+			return display
+	return None
 
 
 def show_svg(svg_text, ax=None):
-	'''Show an SVG string on a matplotlib axis (created if None).'''
+	'''
+	Show an SVG string. With ax, it is drawn on that matplotlib axis. Without, it is displayed as vector image
+	in a notebook (Jupyter or marimo), else on a new matplotlib axis.
+
+	Returns
+	-------
+	matplotlib.axes.Axes or None
+		The axis drawn on, None when displayed in a notebook.
+	'''
+	if ax is None:
+		display = _notebook_display()
+		if display is not None:
+			display(SVGDrawing(svg_text))
+			return None
 	import matplotlib.pyplot as plt
 	from PIL import Image
-	png = svg_to_png(svg_text, dpi=300)
+	png = svg_to_png(svg_text)
 	if ax is None:
 		_, ax = plt.subplots()
 	ax.imshow(Image.open(io.BytesIO(png)))

@@ -66,8 +66,16 @@ class CGMapping:
 		return path
 
 	def show(self, ax=None, **kwargs):
-		'''Show the drawing (see to_svg) on a matplotlib axis.'''
+		'''
+		Show the drawing (see to_svg). With ax, it is drawn on that matplotlib axis (e.g. a subplot). Without,
+		it is displayed as vector image in a notebook (Jupyter or marimo), else on a new matplotlib axis.
+		Returns the matplotlib axis, or None when displayed in a notebook.
+		'''
 		return show_svg(self.to_svg(**kwargs), ax)
+
+	def _repr_svg_(self):
+		'''Display the mapping with the default drawing options in Jupyter and marimo.'''
+		return self.to_svg()
 
 	def show_default(self, ax=None, **kwargs):
 		'''Draw the all-atom molecule with cgsmiles' own drawing function (only show_hydrogens and scale_factor are used).'''

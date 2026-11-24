@@ -21,13 +21,13 @@ The other features need these extras:
 
 | extra       | enables                                   | installs                                   |
 |-------------|-------------------------------------------|--------------------------------------------|
-| `show`      | `show()`, `show_default()`                | matplotlib, pillow, cairosvg, scipy        |
+| `show`      | `show()` outside notebooks and on matplotlib axes, `show_default()` | matplotlib, pillow, resvg-py, scipy |
 | `structure` | `aa_structure()`, `cg_structure()`        | MDAnalysis                                 |
 | `itp`       | `read_itp()`, `change_itp()`, `write_itp()` | vermouth                                 |
 | `all`       | all of the above                          |                                            |
 | `dev`       | `all` and the test suite                  | pytest, ipython                            |
 
-cairosvg needs the system cairo library (`libcairo2` on Debian/Ubuntu, `cairo` with conda or Homebrew).
+All of these are plain pip wheels without system libraries.
 `predict_pka()` needs [pkasolver](https://github.com/mayrf/pkasolver), which is not on PyPI; install it from its repository.
 
 The package was renamed from `CGSmiles_utils` to `cgsmiles_utils`; update old imports to `cgsmiles_utils`.
@@ -35,16 +35,22 @@ The package was renamed from `CGSmiles_utils` to `cgsmiles_utils`; update old im
 ## Quick start
 
 ```python
+import matplotlib.pyplot as plt
 from cgsmiles_utils import CGMapping, DrawOptions
 
 mapping = CGMapping("{[#SC3;n=A][#SN4;n=B][#SP1;n=C]}.{#SC3=CC[$],#SN4=[$]CC[$],#SP1=[$]CO}")
 
-mapping.show(show_bead_labels=True)               # in a notebook (needs [show])
+mapping                                           # last line of a Jupyter/marimo cell: shows the drawing
+mapping.show(show_bead_labels=True)               # vector image in Jupyter/marimo, else matplotlib
 mapping.save("pentanol.svg", style="outline")     # SVG file
 svg = mapping.to_svg(scale_factor=2)              # SVG string
 
 opts = DrawOptions(show_hydrogens=True, show_bead_labels=True)
 mapping.save("pentanol_h.svg", opts=opts, rotate_by=90)   # keyword arguments override opts
+
+fig, axs = plt.subplots(1, 2)                     # several drawings in one figure (needs [show])
+mapping.show(ax=axs[0])
+mapping.show(ax=axs[1], style="outline")
 
 mapping.aa_structure("pentanol_aa.pdb")           # needs [structure]
 mapping.cg_structure("pentanol_cg.gro")           # also writes pentanol_aa.gro
