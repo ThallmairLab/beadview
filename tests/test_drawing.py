@@ -221,3 +221,13 @@ def test_custom_radius_moves_dummy_label():
 	dummy = BeadType('U')
 	assert label_above_bead((0, 0), dummy, 'U1', radius=20)[1] == pytest.approx(-21)
 	assert label_above_bead((0, 0), dummy, 'U1')[1] == pytest.approx(-dummy.radius - 1)
+
+
+def test_lines_through_the_bead_centers_are_spaced_on_either_side(azobenzene):
+	"""With no offset, two angles along one bond may pick opposite sides: they still must not coincide."""
+	import re
+	svg = azobenzene.to_svg(show_angles=True, cg_line_offset=0, line_spacing=8)
+	lines = re.findall(r'id="angle_[^"]*"[^>]*points="([^"]+)"', svg)
+	assert len(lines) == 3
+	segments = [set(zip(line.split()[:-1], line.split()[1:])) for line in lines]
+	assert not any(a & b for i, a in enumerate(segments) for b in segments[i + 1:])  # no segment drawn twice

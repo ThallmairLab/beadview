@@ -157,13 +157,13 @@ class Renderer:
 		self.element_ids = {bead.node: bead.element_id for bead in drawn}
 		beads = [self._bead_svg(bead) for bead in drawn]
 
-		below, above = [], [] # constructions, bonds and angles are drawn below the beads, dihedrals on top
+		above = [] # all interactions are drawn on top of the beads
 		if opts.show_vs_construction:
-			below += self._vs_construction_svg(positions)
+			above += self._vs_construction_svg(positions)
 		if opts.show_bonds:
-			below += self._bonds_svg(positions)
+			above += self._bonds_svg(positions)
 		angles, dihedrals = self._angles_dihedrals_svg(positions)
-		below += angles
+		above += angles
 		above += dihedrals
 
 		labels = []
@@ -177,7 +177,7 @@ class Renderer:
 									 type_color=opts.bead_type_label_color,
 									 name_color=opts.bead_name_label_color)
 					  for bead, anchor in zip(drawn, anchors)]
-		return ''.join(below) + ''.join(beads) + ''.join(above) + ''.join(labels)
+		return ''.join(beads) + ''.join(above) + ''.join(labels)
 
 	# interactions
 	def _highlighted(self):
@@ -265,18 +265,21 @@ class Renderer:
 		centroid = np.mean(list(positions.values()), axis=0)
 		spacing = opts.line_spacing * opts.scale_factor
 		offset = opts.cg_line_offset * opts.scale_factor
-		occupied = {} # (bond, side) -> distances of the lines already placed along that bond on that side
+		# bond -> signed distances of the lines already placed along it (+: left of the bond from its lower node).
+		# Signed, so that lines on opposite sides are compared too: at a small offset they lie on top of each other
+		occupied = {}
 		def place(nodes, color, prefix):
 			points = [positions[n] for n in nodes]
 			side = offset_side(points, offset, centroid)
 			# side relative to each bond in a fixed direction (lower node first), so lines on different paths can be compared
 			lanes = [((a, b), side) if a < b else ((b, a), -side) for a, b in zip(nodes[:-1], nodes[1:])]
-			taken = [d for lane in lanes for d in occupied.get(lane, [])]
+			def clashes(distance):
+				return any(abs(sign * distance - d) < spacing - 1e-9 for bond, sign in lanes for d in occupied.get(bond, []))
 			distance = abs(offset)
-			while any(abs(distance - d) < spacing - 1e-9 for d in taken):
+			while clashes(distance):
 				distance += spacing
-			for lane in lanes:
-				occupied.setdefault(lane, []).append(distance)
+			for bond, sign in lanes:
+				occupied.setdefault(bond, []).append(sign * distance)
 			return svg.polyline(offset_path(points, distance, side), color=color, width=opts.cg_line_width * opts.scale_factor,
 								element_id=self._interaction_id(prefix, nodes))
 
