@@ -142,31 +142,42 @@ def bead_position(bead_graph, coord_of, bead, include_hydrogens=True, weighted=T
 	return np.average(coords, axis=0, weights=weights)
 
 
-def _parse_wvs(bead_graph, atom):
+def _parse_wvs(bead_graph, atom, key='wVS'):
 	'''
-	Return the ``wVS`` annotation of an atom as float, or None if it has none.
+	Return the ``wVS`` annotation (or the one named `key`, e.g. ``wVS_U8``) of an atom as float,
+	or None if it has none.
 	'''
-	value = bead_graph.nodes[atom].get('wVS')
+	value = bead_graph.nodes[atom].get(key)
 	if value is None:
 		return None
 	try:
 		return float(value)
 	except (TypeError, ValueError):
-		raise ValueError(f"wVS='{value}' of atom {bead_graph.nodes[atom].get('element')} "
+		raise ValueError(f"{key}='{value}' of atom {bead_graph.nodes[atom].get('element')} "
 						 "is not a number.") from None
 
 
-def _vs_weight(bead_graph, atom):
+def _own_wvs(bead_graph, atom, vs_name):
 	'''
-	Weight of an atom of a parent bead when it is used for a virtual site (mirrors fast_forward).
-	The atom's own wVS if given; for a hydrogen without one, the wVS of the heavy atom
-	it is bonded to; otherwise the atom's normal mapping weight (w, default 1).
+	The weight of an atom for the virtual site `vs_name` from its own annotations:
+	``wVS_<vs_name>`` if given, else ``wVS``, else None.
 	'''
-	wvs = _parse_wvs(bead_graph, atom)
+	wvs = _parse_wvs(bead_graph, atom, f'wVS_{vs_name}') if vs_name is not None else None
+	return wvs if wvs is not None else _parse_wvs(bead_graph, atom)
+
+
+def _vs_weight(bead_graph, atom, vs_name=None):
+	'''
+	Weight of an atom of a parent bead when it is used for the virtual site with fragment name
+	`vs_name` (mirrors fast_forward). The first of these that is given: the atom's own
+	``wVS_<vs_name>``, its own ``wVS``, for a hydrogen the same two of the heavy atom it is
+	bonded to, the atom's normal mapping weight (w, default 1).
+	'''
+	wvs = _own_wvs(bead_graph, atom, vs_name)
 	if wvs is None and bead_graph.nodes[atom].get('element') == 'H':
 		for anchor in bead_graph.neighbors(atom):
 			if bead_graph.nodes[anchor].get('element') != 'H':
-				wvs = _parse_wvs(bead_graph, anchor)
+				wvs = _own_wvs(bead_graph, anchor, vs_name)
 				break
 	if wvs is None:
 		return bead_graph.nodes[atom].get('weight', 1.0)
@@ -189,11 +200,12 @@ def vs_atom_weights(cg_graph, vnode, virtual_nodes):
 		data = cg_graph.nodes[vnode]
 		raise ValueError(f"Virtual site {data.get('n', data.get('fragname'))} (bead {vnode}) "
 						 "is not bonded to any bead with atoms, so its position is undefined.")
+	vs_name = cg_graph.nodes[vnode].get('fragname')
 	weights = {}
 	for parent in parents:
 		bead_graph = cg_graph.nodes[parent]['graph']
 		for atom in bead_graph.nodes:
-			weights[atom] = weights.get(atom, 0.0) + _vs_weight(bead_graph, atom)
+			weights[atom] = weights.get(atom, 0.0) + _vs_weight(bead_graph, atom, vs_name)
 	return weights
 
 

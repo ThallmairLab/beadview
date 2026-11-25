@@ -76,6 +76,7 @@ mapping.get_smiles()                              # 'CCCCCO'
 | `index=`   | bead  | bead order in `cg_structure` without ITP; all beads need one (default: the numbers at the end of the bead names if all have one, else the order in the string) |
 | `w=`       | atom  | mapping weight of the atom in the bead position (default 1) |
 | `wVS=`     | atom  | weight of the atom in the position of a neighboring virtual site; a hydrogen without one uses the value of its heavy atom (default: `w`) |
+| `wVS_<name>=` | atom | the same, for the neighboring virtual site whose fragment name is `<name>` only; it wins over `wVS`, which stays the default for the other virtual sites (as in fast_forward) |
 
 A bead connected to the rest of the molecule only by bonds of order 0 is a virtual site. It is placed at the weighted center of the atoms of its neighboring beads.
 
